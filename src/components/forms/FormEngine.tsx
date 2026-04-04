@@ -88,7 +88,7 @@ function FormEngine<T extends FieldValues>({
         role="status"
         aria-live="polite"
       >
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-brand-green/10 mb-2">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-brand-green-light mb-2">
           <svg
             className="w-8 h-8 text-brand-green"
             fill="none"
@@ -126,7 +126,7 @@ function FormEngine<T extends FieldValues>({
 
         {/* reCAPTCHA placeholder */}
         <div
-          className="flex items-center gap-2 rounded-lg border border-border px-4 py-3 text-xs text-muted"
+          className="flex items-center gap-2 rounded-[8px] border border-border px-4 py-3 text-xs text-muted"
           aria-label="reCAPTCHA verification"
         >
           <svg
@@ -151,7 +151,7 @@ function FormEngine<T extends FieldValues>({
 
         {submitError && (
           <div
-            className="rounded-lg border border-error bg-error-light px-4 py-3 text-sm text-error"
+            className="rounded-[8px] border border-error bg-error-light px-4 py-3 text-sm text-error"
             role="alert"
           >
             {submitError}

@@ -44,10 +44,10 @@ const RadioGroup = forwardRef<HTMLInputElement, RadioGroupProps>(
               <label
                 key={option.value}
                 htmlFor={optionId}
-                className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer
+                className={`flex items-center gap-3 rounded-[8px] border px-4 py-3 cursor-pointer
                   transition-colors text-sm
                   ${value === option.value
-                    ? "border-primary bg-primary/5 text-primary font-medium"
+                    ? "border-primary bg-primary-light text-primary font-medium"
                     : "border-border hover:border-primary/50 hover:bg-primary/[0.02]"
                   }
                   ${error ? "border-error" : ""}`}

@@ -1,12 +1,17 @@
 import { submissionSchema } from "@/lib/schemas";
-import { contactFormSchema, proposalFormSchema } from "@/lib/schemas";
+import {
+  proposalFormSchema,
+  invoiceFormSchema,
+  billbackFormSchema,
+} from "@/lib/schemas";
 import { logger } from "@/lib/logger";
 import type { z } from "zod";
 
 // Map form slugs to their validation schemas
 const formSchemas: Record<string, z.ZodType<unknown>> = {
-  contact: contactFormSchema,
   proposal: proposalFormSchema,
+  invoice: invoiceFormSchema,
+  billback: billbackFormSchema,
 };
 
 export async function POST(request: Request) {
@@ -52,6 +57,8 @@ export async function POST(request: Request) {
 
     // TODO: Phase 3 — Insert into Supabase form_submissions table
     // TODO: Phase 2-3 — Send email notifications
+    //   invoice -> invoices@psprop.net (Subject: "New Invoice - {Community Name}")
+    //   billback -> mgrbillback@psprop.net (Subject: "New Invoice - {entry_id}")
     // TODO: Phase 2-3 — Forward to CloudMailIn addresses
 
     logger.info("Form submission received", {

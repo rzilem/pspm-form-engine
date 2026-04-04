@@ -22,11 +22,11 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const baseStyles =
-      "inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
+      "inline-flex items-center justify-center font-medium rounded-[8px] transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
 
     const variantStyles = {
       primary:
-        "bg-primary text-white hover:bg-primary-dark focus:ring-primary/40",
+        "bg-primary text-white hover:bg-primary-hover focus:ring-primary/40",
       secondary:
         "bg-brand-green text-white hover:bg-brand-green-dark focus:ring-brand-green/40",
       outline:

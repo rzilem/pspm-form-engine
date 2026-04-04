@@ -115,7 +115,7 @@ function FileUpload({
             inputRef.current?.click();
           }
         }}
-        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed
+        className={`flex flex-col items-center justify-center rounded-[8px] border-2 border-dashed
           px-6 py-8 cursor-pointer transition-colors text-center
           ${dragActive
             ? "border-primary bg-primary/5"
@@ -166,7 +166,7 @@ function FileUpload({
           {files.map((f) => (
             <li
               key={f.id}
-              className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm"
+              className="flex items-center justify-between rounded-[8px] border border-border px-3 py-2 text-sm"
             >
               <div className="flex items-center gap-2 min-w-0">
                 <svg

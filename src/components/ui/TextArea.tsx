@@ -36,7 +36,7 @@ const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
               .filter(Boolean)
               .join(" ") || undefined
           }
-          className={`rounded-lg border px-3 py-2.5 text-sm transition-colors resize-y
+          className={`rounded-[8px] border px-3 py-2.5 text-sm transition-colors resize-y
             focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary
             disabled:opacity-50 disabled:cursor-not-allowed
             ${error ? "border-error bg-error-light" : "border-border bg-white hover:border-primary/50"}`}

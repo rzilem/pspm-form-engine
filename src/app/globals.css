@@ -2,10 +2,12 @@
 
 @theme inline {
   --color-primary: #3A4DA8;
-  --color-primary-dark: #2D3A8C;
-  --color-navy: #2D3A8C;
-  --color-brand-green: #4CAF50;
-  --color-brand-green-dark: #388E3C;
+  --color-primary-hover: #2E3E86;
+  --color-primary-light: #ECEEF7;
+  --color-navy: #1B4F72;
+  --color-brand-green: #4CB648;
+  --color-brand-green-dark: #3D923A;
+  --color-brand-green-light: #EDF7EC;
   --color-background: #ffffff;
   --color-foreground: #1a1a2e;
   --color-muted: #6b7280;

@@ -45,7 +45,7 @@ const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
               .filter(Boolean)
               .join(" ") || undefined
           }
-          className={`rounded-lg border px-3 py-2.5 text-sm transition-colors appearance-none
+          className={`rounded-[8px] border px-3 py-2.5 text-sm transition-colors appearance-none
             bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20d%3D%22M6%208L1%203h10z%22%20fill%3D%22%236b7280%22%2F%3E%3C%2Fsvg%3E')]
             bg-no-repeat bg-[position:right_12px_center]
             focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary

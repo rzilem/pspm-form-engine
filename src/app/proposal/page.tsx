@@ -94,7 +94,7 @@ export default function ProposalPage() {
 
             {/* CONDITIONAL: Call us now */}
             <ConditionalField watchField="intent" showWhen="Call us now">
-              <div className="rounded-xl border-2 border-primary bg-primary/5 p-6 text-center space-y-2">
+              <div className="rounded-[12px] border-2 border-primary bg-primary-light p-6 text-center space-y-2">
                 <h2 className="text-lg font-bold text-navy">Call us now!</h2>
                 <a
                   href={`tel:${PSPM_PHONE.replace(/-/g, "")}`}
@@ -113,7 +113,7 @@ export default function ProposalPage() {
               watchField="intent"
               showWhen="Schedule a call with Senior Management Team"
             >
-              <div className="rounded-xl border-2 border-primary bg-primary/5 p-6 text-center space-y-2">
+              <div className="rounded-[12px] border-2 border-primary bg-primary-light p-6 text-center space-y-2">
                 <h2 className="text-lg font-bold text-navy">
                   Schedule an Information Call
                 </h2>
