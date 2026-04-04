@@ -97,12 +97,16 @@ function TimeSlotPicker({
     async (start: string, end: string) => {
       if (!amenityId) return;
 
-      // Release previous hold
+      // Release previous hold (best-effort, don't block new selection)
       if (holdId) {
-        await fetch(
-          `${API_BASE}/api/booking/hold?id=${holdId}&session_id=${sessionId}`,
-          { method: "DELETE" }
-        ).catch(() => {});
+        try {
+          await fetch(
+            `${API_BASE}/api/booking/hold?id=${holdId}&session_id=${sessionId}`,
+            { method: "DELETE" }
+          );
+        } catch {
+          // Previous hold will expire naturally if release fails
+        }
       }
 
       // Create new hold

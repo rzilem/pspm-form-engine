@@ -62,7 +62,7 @@ export async function POST(request: Request) {
 
         // Send reminder emails
         let sent = 0;
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "https://pspm-form-engine-138752496729.us-central1.run.app";
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
         for (const r of upcoming ?? []) {
           // Get amenity name
           const { data: am } = await supabase.from("amenities").select("name").eq("id", r.amenity_id).single();

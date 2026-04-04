@@ -160,7 +160,7 @@ export async function POST(request: Request) {
     }
 
     // 8. Build manage URL
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || `https://pspm-form-engine-138752496729.us-central1.run.app`;
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
     const manageUrl = `${baseUrl}/booking/manage/${manageToken}`;
 
     logger.info("Reservation created", {
