@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { isAdminAuthenticated, unauthorizedResponse } from "@/lib/admin-auth";
 import { logger } from "@/lib/logger";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const amenitySlug = searchParams.get("amenity");
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     let query = supabase
       .from("blackout_dates")
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing amenity_slug or date" }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     const { data: amenity } = await supabase
       .from("amenities")
@@ -103,7 +103,7 @@ export async function DELETE(request: Request) {
       return Response.json({ error: "Missing id" }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     const { error } = await supabase
       .from("blackout_dates")

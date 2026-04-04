@@ -1,8 +1,8 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 import { sendBookingReminder } from "@/lib/email";
 
-const CRON_SECRET = process.env.ADMIN_PASSWORD ?? "";
+const CRON_SECRET = process.env.CRON_SECRET || process.env.ADMIN_PASSWORD || "";
 
 /**
  * POST /api/cron — handles scheduled tasks
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { action: string };
     const { action } = body;
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     switch (action) {
       case "cleanup-holds": {

@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { isAdminAuthenticated, unauthorizedResponse } from "@/lib/admin-auth";
 import { generateConfirmationCode, generateManageToken } from "@/lib/booking";
 import { logger } from "@/lib/logger";
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 100);
     const format = searchParams.get("format");
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     let query = supabase
       .from("reservations")
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
       skip_payment?: boolean;
     };
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     // Get amenity
     const { data: amenity } = await supabase
@@ -188,7 +188,7 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Missing reservation id" }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
     if (body.status) {
