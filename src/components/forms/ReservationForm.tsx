@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   FormProvider,
   useForm,
@@ -10,7 +10,8 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FormLayout } from "@/components/forms/FormLayout";
 import { StepWizard, type StepDefinition } from "@/components/forms/StepWizard";
-import { DateTimePicker } from "@/components/forms/DateTimePicker";
+import { BookingCalendar } from "@/components/booking/BookingCalendar";
+import { BookingSummary } from "@/components/booking/BookingSummary";
 import { TextInput } from "@/components/ui/TextInput";
 import { TextArea } from "@/components/ui/TextArea";
 import { RadioGroup } from "@/components/ui/RadioGroup";
@@ -20,14 +21,17 @@ import { ConsentCheckbox } from "@/components/forms/ConsentCheckbox";
 import { SignaturePad } from "@/components/forms/SignaturePad";
 import { StripePayment } from "@/components/forms/StripePayment";
 import { reservationSchema, type ReservationFormData } from "@/lib/schemas";
+import { formatTime12h } from "@/lib/booking";
 
 const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
-  ? `${process.env.NEXT_PUBLIC_API_URL}/api/submit`
-  : "/api/submit";
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api/booking/reserve`
+  : "/api/booking/reserve";
 
 interface ReservationConfig {
   title: string;
   subtitle: string;
+  amenitySlug: string;
+  amenityName: string;
   datePickerLabel: string;
   consentText: string;
   amountCents: number;
@@ -39,6 +43,10 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [leaseFiles, setLeaseFiles] = useState<File[]>([]);
+  const [confirmationCode, setConfirmationCode] = useState<string | null>(null);
+  const [manageUrl, setManageUrl] = useState<string | null>(null);
+  const holdIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef(crypto.randomUUID());
 
   // Suppress unused var — files stored for upload
   void leaseFiles;
@@ -49,6 +57,8 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
     defaultValues: {
       reservationDate: "",
       reservationTime: "",
+      startTime: "",
+      endTime: "",
       streetAddress: "",
       city: "",
       state: "TX",
@@ -73,6 +83,9 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
 
   const { control, register, watch, setValue, formState: { errors, isSubmitting } } = form;
   const propertyStatus = watch("propertyStatus");
+  const reservationDate = watch("reservationDate");
+  const startTime = watch("startTime");
+  const endTime = watch("endTime");
 
   const amountFormatted = `$${(config.amountCents / 100).toFixed(2)}`;
 
@@ -82,6 +95,21 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
     },
     [setValue]
   );
+
+  const handleSlotSelected = useCallback(
+    (date: string, start: string, end: string) => {
+      setValue("reservationDate", date);
+      setValue("startTime", start);
+      setValue("endTime", end);
+      // Set reservationTime as display string for backward compat
+      setValue("reservationTime", `${formatTime12h(start)} - ${formatTime12h(end)}`);
+    },
+    [setValue]
+  );
+
+  const handleHoldCreated = useCallback((hId: string, _expiresAt: string) => {
+    holdIdRef.current = hId;
+  }, []);
 
   async function onSubmit() {
     setSubmitError(null);
@@ -105,16 +133,27 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
       const response = await fetch(SUBMIT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formSlug: config.formSlug, data }),
+        body: JSON.stringify({
+          formSlug: config.formSlug,
+          amenitySlug: config.amenitySlug,
+          sessionId: sessionIdRef.current,
+          holdId: holdIdRef.current,
+          data,
+        }),
       });
 
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        confirmation_code?: string;
+        manage_url?: string;
+      };
+
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as {
-          error?: string;
-        };
         throw new Error(body.error ?? `Submission failed (${response.status})`);
       }
 
+      setConfirmationCode(body.confirmation_code ?? null);
+      setManageUrl(body.manage_url ?? null);
       setSubmitted(true);
     } catch (err) {
       const message =
@@ -127,7 +166,7 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
     return (
       <FormLayout title={config.title} subtitle={config.subtitle}>
         <div
-          className="text-center py-12 space-y-4"
+          className="text-center py-12 space-y-6"
           role="status"
           aria-live="polite"
         >
@@ -150,6 +189,39 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
           <p className="text-lg font-medium text-navy">
             {config.confirmationMessage}
           </p>
+
+          {confirmationCode && (
+            <div className="space-y-3">
+              <div className="bg-primary-light rounded-[8px] px-6 py-4 inline-block">
+                <p className="text-xs text-muted uppercase tracking-wide">Confirmation Code</p>
+                <p className="text-2xl font-bold text-primary tracking-wider">{confirmationCode}</p>
+              </div>
+
+              {reservationDate && startTime && endTime && (
+                <BookingSummary
+                  amenityName={config.amenityName}
+                  date={reservationDate}
+                  startTime={startTime}
+                  endTime={endTime}
+                  amountCents={config.amountCents}
+                />
+              )}
+
+              {manageUrl && (
+                <div className="pt-2">
+                  <a
+                    href={manageUrl}
+                    className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                  >
+                    Manage Your Reservation
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </FormLayout>
     );
@@ -160,26 +232,13 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
       label: "Schedule",
       fields: ["reservationDate", "reservationTime"],
       render: () => (
-        <Controller
-          name="reservationDate"
-          control={control}
-          render={({ field: dateField }) => (
-            <Controller
-              name="reservationTime"
-              control={control}
-              render={({ field: timeField }) => (
-                <DateTimePicker
-                  label={config.datePickerLabel}
-                  required
-                  dateValue={dateField.value}
-                  timeValue={timeField.value}
-                  onDateChange={dateField.onChange}
-                  onTimeChange={timeField.onChange}
-                  error={errors.reservationDate ?? errors.reservationTime}
-                />
-              )}
-            />
-          )}
+        <BookingCalendar
+          amenitySlug={config.amenitySlug}
+          label={config.datePickerLabel}
+          required
+          error={errors.reservationDate ?? errors.reservationTime}
+          onSlotSelected={handleSlotSelected}
+          onHoldCreated={handleHoldCreated}
         />
       ),
     },
@@ -309,7 +368,7 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
       ),
     },
     {
-      label: "Function Details",
+      label: "Agreement",
       fields: [
         "attendeeCount",
         "purposeOfFunction",
@@ -321,6 +380,17 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
       ],
       render: () => (
         <div className="space-y-4">
+          {/* Booking summary at top of agreement step */}
+          {reservationDate && startTime && endTime && (
+            <BookingSummary
+              amenityName={config.amenityName}
+              date={reservationDate}
+              startTime={startTime}
+              endTime={endTime}
+              amountCents={config.amountCents}
+            />
+          )}
+
           <p className="text-sm font-medium text-navy">Function Details</p>
 
           <TextInput
@@ -416,13 +486,20 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
       fields: [],
       render: () => (
         <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Event Room Reservation &mdash; {amountFormatted}
-          </p>
+          {/* Summary before payment */}
+          {reservationDate && startTime && endTime && (
+            <BookingSummary
+              amenityName={config.amenityName}
+              date={reservationDate}
+              startTime={startTime}
+              endTime={endTime}
+              amountCents={config.amountCents}
+            />
+          )}
 
           <StripePayment
             amountCents={config.amountCents}
-            label={`Reservation Total`}
+            label="Reservation Deposit"
             onPaymentSuccess={handlePaymentSuccess}
           />
 

@@ -7,6 +7,9 @@ import {
   reservationSchema,
 } from "@/lib/schemas";
 import { logger } from "@/lib/logger";
+import { getSupabase } from "@/lib/supabase";
+import { sendFormNotification } from "@/lib/email";
+import { verifyRecaptcha } from "@/lib/recaptcha";
 import type { z } from "zod";
 
 // Map form slugs to their validation schemas
@@ -35,7 +38,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { formSlug, data } = envelope.data;
+    const { formSlug, data, recaptchaToken } = envelope.data;
+
+    // Verify reCAPTCHA
+    const captchaValid = await verifyRecaptcha(recaptchaToken);
+    if (!captchaValid) {
+      logger.warn("reCAPTCHA failed", { formSlug });
+      return Response.json({ error: "Bot detection failed. Please try again." }, { status: 403 });
+    }
 
     // Validate form-specific data
     const formSchema = formSchemas[formSlug];
@@ -60,21 +70,42 @@ export async function POST(request: Request) {
       );
     }
 
-    // TODO: Phase 3 — Insert into Supabase form_submissions table
-    // TODO: Phase 2-3 — Send email notifications
-    //   invoice -> invoices@psprop.net (Subject: "New Invoice - {Community Name}")
-    //   billback -> mgrbillback@psprop.net (Subject: "New Invoice - {entry_id}")
-    // TODO: Phase 2-3 — Forward to CloudMailIn addresses
+    // Save to Supabase
+    const supabase = getSupabase();
+    const ip = request.headers.get("x-forwarded-for") ?? request.headers.get("cf-connecting-ip") ?? null;
+    const userAgent = request.headers.get("user-agent") ?? null;
 
-    logger.info("Form submission received", {
+    const { data: submission, error: insertErr } = await supabase
+      .from("form_submissions")
+      .insert({
+        form_slug: formSlug,
+        data: formResult.data as Record<string, unknown>,
+        ip_address: ip,
+        user_agent: userAgent,
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) {
+      logger.error("Failed to save form submission", { error: insertErr.message, formSlug });
+      return Response.json({ error: "Failed to save submission" }, { status: 500 });
+    }
+
+    // Send email notification (non-blocking)
+    sendFormNotification(formSlug, formResult.data as Record<string, unknown>).catch((err) => {
+      logger.error("Email notification failed", { error: String(err), formSlug });
+    });
+
+    logger.info("Form submission saved", {
       formSlug,
-      timestamp: new Date().toISOString(),
+      submissionId: submission.id,
     });
 
     return Response.json({
       success: true,
       message: "Submission received",
       formSlug,
+      id: submission.id,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

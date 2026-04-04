@@ -278,9 +278,11 @@ export const PROPERTY_STATUS_OPTIONS = [
 
 export const reservationSchema = z
   .object({
-    // Step 1: Schedule
+    // Step 1: Schedule (booking calendar)
     reservationDate: z.string().min(1, "Please select a date"),
     reservationTime: z.string().min(1, "Please select a time"),
+    startTime: z.string().optional(), // HH:MM from booking calendar
+    endTime: z.string().optional(),   // HH:MM from booking calendar
     // Step 2: Your Information
     streetAddress: z.string().min(1, "Street address is required").max(200),
     city: z.string().min(1, "City is required").max(100),
@@ -325,6 +327,7 @@ export type ReservationFormData = z.infer<typeof reservationSchema>;
 export const submissionSchema = z.object({
   formSlug: z.string().min(1),
   data: z.record(z.string(), z.unknown()),
+  recaptchaToken: z.string().optional(),
 });
 
 export type SubmissionPayload = z.infer<typeof submissionSchema>;

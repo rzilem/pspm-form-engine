@@ -6,6 +6,8 @@ import type { ReservationConfig } from "@/components/forms/ReservationForm";
 const INDOOR_CONFIG: ReservationConfig = {
   title: "Indoor Gathering Room Reservation",
   subtitle: "Reserve the indoor gathering room for your community event.",
+  amenitySlug: "indoor-gathering",
+  amenityName: "Indoor Gathering Room",
   datePickerLabel: "Indoor Gathering Room",
   consentText:
     "I agree to the reservation terms and conditions, including quiet hours, capacity limits, and community rules.",
