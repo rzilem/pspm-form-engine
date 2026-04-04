@@ -37,26 +37,29 @@ const forms: FormCard[] = [
   },
   {
     title: "Falcon Pointe Portal Request",
-    description: "Submit ARC requests and community portal inquiries.",
+    description:
+      "Submit ARC applications, billing questions, or general inquiries.",
     href: "/portal/falcon-pointe",
-    status: "coming-soon",
+    status: "live",
   },
   {
     title: "Indoor Gathering Room Reservation",
-    description: "Reserve the indoor gathering room with payment.",
+    description:
+      "Reserve the indoor gathering room with Stripe payment ($100).",
     href: "/reserve/indoor",
-    status: "coming-soon",
+    status: "live",
   },
   {
     title: "Pool Pavilion Reservation",
-    description: "Reserve the pool pavilion for community events.",
-    href: "/reserve/pool-pavilion",
-    status: "coming-soon",
+    description:
+      "Reserve the pool pavilion for community events ($75).",
+    href: "/reserve/pavilion",
+    status: "live",
   },
   {
     title: "Bid Request System",
     description: "Submit and manage vendor bid requests for community projects.",
-    href: "/bid-request",
+    href: "/bid",
     status: "coming-soon",
   },
 ];

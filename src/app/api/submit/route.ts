@@ -3,6 +3,8 @@ import {
   proposalFormSchema,
   invoiceFormSchema,
   billbackFormSchema,
+  falconPointeSchema,
+  reservationSchema,
 } from "@/lib/schemas";
 import { logger } from "@/lib/logger";
 import type { z } from "zod";
@@ -12,6 +14,9 @@ const formSchemas: Record<string, z.ZodType<unknown>> = {
   proposal: proposalFormSchema,
   invoice: invoiceFormSchema,
   billback: billbackFormSchema,
+  "falcon-pointe-portal": falconPointeSchema,
+  "indoor-reservation": reservationSchema,
+  "pavilion-reservation": reservationSchema,
 };
 
 export async function POST(request: Request) {
