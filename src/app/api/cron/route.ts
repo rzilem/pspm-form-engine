@@ -46,9 +46,10 @@ export async function POST(request: Request) {
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
+        // Join amenity name and include manage_token in a single query — no N+1
         const { data: upcoming, error } = await supabase
           .from("reservations")
-          .select("id, confirmation_code, resident_name, resident_email, reservation_date, start_time, end_time, amenity_id")
+          .select("id, confirmation_code, manage_token, resident_name, resident_email, reservation_date, start_time, end_time, amenities(name)")
           .eq("reservation_date", tomorrowStr)
           .eq("status", "confirmed");
 
@@ -64,24 +65,17 @@ export async function POST(request: Request) {
         let sent = 0;
         const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
         for (const r of upcoming ?? []) {
-          // Get amenity name
-          const { data: am } = await supabase.from("amenities").select("name").eq("id", r.amenity_id).single();
-          const manageToken = await supabase
-            .from("reservations")
-            .select("manage_token")
-            .eq("id", r.id)
-            .single();
-
+          const amenityName = (r.amenities as { name?: string } | null)?.name ?? "Amenity";
           try {
             await sendBookingReminder({
               email: r.resident_email,
               name: r.resident_name,
               confirmationCode: r.confirmation_code,
-              amenityName: am?.name ?? "Amenity",
+              amenityName,
               date: r.reservation_date,
               startTime: r.start_time,
               endTime: r.end_time,
-              manageUrl: `${baseUrl}/booking/manage/${manageToken.data?.manage_token ?? ""}`,
+              manageUrl: `${baseUrl}/booking/manage/${r.manage_token ?? ""}`,
             });
             sent++;
           } catch (err) {

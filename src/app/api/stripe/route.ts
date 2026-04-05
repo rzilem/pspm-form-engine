@@ -5,9 +5,7 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? "";
 
 function getStripeClient(): Stripe | null {
   if (!STRIPE_SECRET_KEY) return null;
-  return new Stripe(STRIPE_SECRET_KEY, {
-    typescript: true,
-  });
+  return new Stripe(STRIPE_SECRET_KEY);
 }
 
 export async function POST(request: Request) {

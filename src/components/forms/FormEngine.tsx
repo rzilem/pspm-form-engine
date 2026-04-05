@@ -42,8 +42,7 @@ function FormEngine<T extends FieldValues>({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const methods = useForm<T>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(schema as any) as Resolver<T>,
+    resolver: zodResolver<T>(schema) as Resolver<T>,
     defaultValues,
     mode: "onTouched",
   });

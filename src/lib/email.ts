@@ -2,6 +2,14 @@ import { Resend } from "resend";
 import { logger } from "@/lib/logger";
 import { formatTime12h } from "@/lib/booking";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
 const FROM_EMAIL = "PSPM Forms <forms@psprop.net>";
 
@@ -69,16 +77,16 @@ export async function sendBookingConfirmation(params: {
     to: [params.email],
     subject: `Reservation Confirmed — ${params.confirmationCode}`,
     html: wrapHtml(`Reservation Confirmed`, `
-      <p>Hi ${params.name},</p>
+      <p>Hi ${escapeHtml(params.name)},</p>
       <p>Your reservation has been confirmed!</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Confirmation</td><td style="padding:6px 12px">${params.confirmationCode}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Amenity</td><td style="padding:6px 12px">${params.amenityName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Date</td><td style="padding:6px 12px">${dateFormatted}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Time</td><td style="padding:6px 12px">${formatTime12h(params.startTime)} – ${formatTime12h(params.endTime)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Confirmation</td><td style="padding:6px 12px">${escapeHtml(params.confirmationCode)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Amenity</td><td style="padding:6px 12px">${escapeHtml(params.amenityName)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Date</td><td style="padding:6px 12px">${escapeHtml(dateFormatted)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Time</td><td style="padding:6px 12px">${escapeHtml(formatTime12h(params.startTime))} – ${escapeHtml(formatTime12h(params.endTime))}</td></tr>
         <tr><td style="padding:6px 12px;font-weight:bold">Deposit</td><td style="padding:6px 12px">$${(params.amount / 100).toFixed(2)}</td></tr>
       </table>
-      <p><a href="${params.manageUrl}" style="display:inline-block;background:#3A4DA8;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Manage Reservation</a></p>
+      <p><a href="${escapeHtml(params.manageUrl)}" style="display:inline-block;background:#3A4DA8;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Manage Reservation</a></p>
       <p style="color:#666;font-size:13px">Need to cancel or reschedule? Use the link above. Cancellations made at least 48 hours in advance are eligible for a full refund.</p>
     `),
   });
@@ -112,14 +120,14 @@ export async function sendBookingReminder(params: {
     to: [params.email],
     subject: `Reminder: Your reservation is tomorrow — ${params.confirmationCode}`,
     html: wrapHtml("Reservation Reminder", `
-      <p>Hi ${params.name},</p>
+      <p>Hi ${escapeHtml(params.name)},</p>
       <p>This is a friendly reminder that your reservation is <strong>tomorrow</strong>.</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Amenity</td><td style="padding:6px 12px">${params.amenityName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Date</td><td style="padding:6px 12px">${dateFormatted}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Time</td><td style="padding:6px 12px">${formatTime12h(params.startTime)} – ${formatTime12h(params.endTime)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Amenity</td><td style="padding:6px 12px">${escapeHtml(params.amenityName)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Date</td><td style="padding:6px 12px">${escapeHtml(dateFormatted)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Time</td><td style="padding:6px 12px">${escapeHtml(formatTime12h(params.startTime))} – ${escapeHtml(formatTime12h(params.endTime))}</td></tr>
       </table>
-      <p><a href="${params.manageUrl}" style="display:inline-block;background:#3A4DA8;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Manage Reservation</a></p>
+      <p><a href="${escapeHtml(params.manageUrl)}" style="display:inline-block;background:#3A4DA8;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Manage Reservation</a></p>
     `),
   });
 
@@ -145,11 +153,11 @@ export async function sendAdminBookingNotification(params: {
     html: wrapHtml("New Reservation", `
       <p>A new reservation has been submitted:</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Code</td><td style="padding:6px 12px">${params.confirmationCode}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Resident</td><td style="padding:6px 12px">${params.residentName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Amenity</td><td style="padding:6px 12px">${params.amenityName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Date</td><td style="padding:6px 12px">${params.date}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Time</td><td style="padding:6px 12px">${formatTime12h(params.startTime)} – ${formatTime12h(params.endTime)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Code</td><td style="padding:6px 12px">${escapeHtml(params.confirmationCode)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Resident</td><td style="padding:6px 12px">${escapeHtml(params.residentName)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Amenity</td><td style="padding:6px 12px">${escapeHtml(params.amenityName)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Date</td><td style="padding:6px 12px">${escapeHtml(params.date)}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Time</td><td style="padding:6px 12px">${escapeHtml(formatTime12h(params.startTime))} – ${escapeHtml(formatTime12h(params.endTime))}</td></tr>
       </table>
     `),
   });
@@ -178,9 +186,9 @@ export async function sendCancellationEmail(params: {
     to: [params.email],
     subject: `Reservation Cancelled — ${params.confirmationCode}`,
     html: wrapHtml("Reservation Cancelled", `
-      <p>Hi ${params.name},</p>
-      <p>Your reservation (${params.confirmationCode}) for <strong>${params.amenityName}</strong> on ${params.date} has been cancelled.</p>
-      <p>${refundText}</p>
+      <p>Hi ${escapeHtml(params.name)},</p>
+      <p>Your reservation (${escapeHtml(params.confirmationCode)}) for <strong>${escapeHtml(params.amenityName)}</strong> on ${escapeHtml(params.date)} has been cancelled.</p>
+      <p>${escapeHtml(refundText)}</p>
       <p>If you have questions, call us at 512-251-6122.</p>
     `),
   });
@@ -203,12 +211,12 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
     body: `
       <p>A new management proposal request has been submitted:</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Name</td><td style="padding:6px 12px">${data.firstName} ${data.lastName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Association</td><td style="padding:6px 12px">${data.associationName ?? "N/A"}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Type</td><td style="padding:6px 12px">${data.proposalType ?? "N/A"}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Units</td><td style="padding:6px 12px">${data.numberOfUnits ?? "N/A"}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Email</td><td style="padding:6px 12px">${data.email ?? "N/A"}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Phone</td><td style="padding:6px 12px">${data.phone ?? "N/A"}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Name</td><td style="padding:6px 12px">${escapeHtml(String(data.firstName ?? ""))} ${escapeHtml(String(data.lastName ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Association</td><td style="padding:6px 12px">${escapeHtml(String(data.associationName ?? "N/A"))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Type</td><td style="padding:6px 12px">${escapeHtml(String(data.proposalType ?? "N/A"))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Units</td><td style="padding:6px 12px">${escapeHtml(String(data.numberOfUnits ?? "N/A"))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Email</td><td style="padding:6px 12px">${escapeHtml(String(data.email ?? "N/A"))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Phone</td><td style="padding:6px 12px">${escapeHtml(String(data.phone ?? "N/A"))}</td></tr>
       </table>
     `,
   }),
@@ -219,9 +227,9 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
     body: `
       <p>A new invoice has been submitted:</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Community</td><td style="padding:6px 12px">${data.communityName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Type</td><td style="padding:6px 12px">${data.invoiceType}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Account #</td><td style="padding:6px 12px">${data.accountNumber ?? "N/A"}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Community</td><td style="padding:6px 12px">${escapeHtml(String(data.communityName ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Type</td><td style="padding:6px 12px">${escapeHtml(String(data.invoiceType ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Account #</td><td style="padding:6px 12px">${escapeHtml(String(data.accountNumber ?? "N/A"))}</td></tr>
       </table>
     `,
   }),
@@ -232,8 +240,8 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
     body: `
       <p>A new billback has been submitted:</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Community</td><td style="padding:6px 12px">${data.communityName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Notes</td><td style="padding:6px 12px">${data.notes ?? "N/A"}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Community</td><td style="padding:6px 12px">${escapeHtml(String(data.communityName ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Notes</td><td style="padding:6px 12px">${escapeHtml(String(data.notes ?? "N/A"))}</td></tr>
       </table>
     `,
   }),
@@ -244,10 +252,10 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
     body: `
       <p>A new portal request has been submitted:</p>
       <table style="border-collapse:collapse;margin:16px 0">
-        <tr><td style="padding:6px 12px;font-weight:bold">Name</td><td style="padding:6px 12px">${data.firstName} ${data.lastName}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Address</td><td style="padding:6px 12px">${data.address}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Type</td><td style="padding:6px 12px">${data.requestType}</td></tr>
-        <tr><td style="padding:6px 12px;font-weight:bold">Email</td><td style="padding:6px 12px">${data.email}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Name</td><td style="padding:6px 12px">${escapeHtml(String(data.firstName ?? ""))} ${escapeHtml(String(data.lastName ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Address</td><td style="padding:6px 12px">${escapeHtml(String(data.address ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Type</td><td style="padding:6px 12px">${escapeHtml(String(data.requestType ?? ""))}</td></tr>
+        <tr><td style="padding:6px 12px;font-weight:bold">Email</td><td style="padding:6px 12px">${escapeHtml(String(data.email ?? ""))}</td></tr>
       </table>
     `,
   }),

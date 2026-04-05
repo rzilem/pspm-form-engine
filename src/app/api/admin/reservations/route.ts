@@ -34,7 +34,11 @@ export async function GET(request: Request) {
     if (from) query = query.gte("reservation_date", from);
     if (to) query = query.lte("reservation_date", to);
     if (search) {
-      query = query.or(`resident_name.ilike.%${search}%,resident_email.ilike.%${search}%,confirmation_code.ilike.%${search}%`);
+      // Sanitize: allow only safe characters to prevent PostgREST injection
+      const safeSearch = search.replace(/[^a-zA-Z0-9 @._-]/g, "").slice(0, 100);
+      if (safeSearch) {
+        query = query.or(`resident_name.ilike.%${safeSearch}%,resident_email.ilike.%${safeSearch}%,confirmation_code.ilike.%${safeSearch}%`);
+      }
     }
 
     query = query.order("reservation_date", { ascending: false });
@@ -54,7 +58,7 @@ export async function GET(request: Request) {
         r.status, `$${(r.amount_cents / 100).toFixed(2)}`, r.stripe_status, r.created_at,
       ]);
 
-      const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${v}"`).join(","))].join("\n");
+      const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
 
       return new Response(csv, {
         headers: {

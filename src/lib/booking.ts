@@ -179,7 +179,13 @@ export function formatTime12h(time24: string): string {
 /** Generate a human-readable confirmation code: FP-YYYY-MMDD-XXXX */
 export function generateConfirmationCode(date: string): string {
   const d = date.replace(/-/g, "").slice(0, 8); // YYYYMMDD
-  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+  // Use crypto.getRandomValues for an unguessable suffix
+  const bytes = crypto.getRandomValues(new Uint8Array(3));
+  const rand = Array.from(bytes)
+    .map((b) => b.toString(36).padStart(2, "0"))
+    .join("")
+    .slice(0, 4)
+    .toUpperCase();
   return `FP-${d.slice(0, 4)}-${d.slice(4)}-${rand}`;
 }
 

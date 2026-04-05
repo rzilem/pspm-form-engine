@@ -52,8 +52,7 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
   void leaseFiles;
 
   const form = useForm<ReservationFormData>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(reservationSchema as any) as Resolver<ReservationFormData>,
+    resolver: zodResolver<ReservationFormData>(reservationSchema) as Resolver<ReservationFormData>,
     defaultValues: {
       reservationDate: "",
       reservationTime: "",
@@ -113,6 +112,14 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
 
   async function onSubmit() {
     setSubmitError(null);
+
+    // Re-validate the entire form before submitting — guards against edge cases
+    // where the wizard step validation was skipped or fields changed after step completion
+    const isValid = await form.trigger();
+    if (!isValid) {
+      setSubmitError("Please review your answers — some fields are missing or invalid.");
+      return;
+    }
 
     // Confirm Stripe payment first
     const stripeEl = document.getElementById("stripe-confirm-fn") as

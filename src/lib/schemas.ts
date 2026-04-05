@@ -313,13 +313,8 @@ export const reservationSchema = z
     signature: z.string().min(1, "Signature is required"),
     // Step 4: Payment — handled separately by Stripe
     stripePaymentId: z.string().optional(),
-  })
-  .superRefine((data, ctx) => {
-    // Tenant requires lease upload — validated at form level via file upload
-    // (file upload not in Zod schema since it's handled by FileUpload component)
-    void data;
-    void ctx;
   });
+// Note: lease upload validation is client-side only (file inputs can't be validated via Zod)
 
 export type ReservationFormData = z.infer<typeof reservationSchema>;
 

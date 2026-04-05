@@ -1,16 +1,8 @@
 import { getSupabase } from "@/lib/supabase";
 import { generateConfirmationCode, generateManageToken } from "@/lib/booking";
 import { logger } from "@/lib/logger";
-import { sendBookingConfirmation, sendAdminBookingNotification } from "@/lib/email";
+import { sendAdminBookingNotification } from "@/lib/email";
 import { verifyRecaptcha } from "@/lib/recaptcha";
-import Stripe from "stripe";
-
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? "";
-
-function getStripe(): Stripe | null {
-  if (!STRIPE_SECRET_KEY) return null;
-  return new Stripe(STRIPE_SECRET_KEY, { typescript: true });
-}
 
 interface ReserveBody {
   formSlug: string;
@@ -90,22 +82,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Create Stripe PaymentIntent if not already paid
-    let stripePaymentIntentId = data.stripePaymentId ?? null;
-    let stripeStatus = "pending";
-
-    if (stripePaymentIntentId) {
-      // Verify payment with Stripe
-      const stripe = getStripe();
-      if (stripe) {
-        try {
-          const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
-          stripeStatus = pi.status === "succeeded" ? "succeeded" : pi.status;
-        } catch {
-          stripeStatus = "pending";
-        }
-      }
-    }
+    // 3. Store the Stripe PaymentIntent ID — always insert as pending.
+    // The webhook handler (stripe/webhook/route.ts) exclusively flips to confirmed
+    // once payment_intent.succeeded fires.
+    const stripePaymentIntentId = data.stripePaymentId ?? null;
 
     // 4. Generate confirmation code and manage token
     const confirmationCode = generateConfirmationCode(data.reservationDate);
@@ -136,8 +116,8 @@ export async function POST(request: Request) {
         signature_url: data.signature,
         amount_cents: amenity.deposit_cents,
         stripe_payment_intent_id: stripePaymentIntentId,
-        stripe_status: stripeStatus,
-        status: stripeStatus === "succeeded" ? "confirmed" : "pending",
+        stripe_status: "pending",
+        status: "pending",
         manage_token: manageToken,
         ip_address: ip,
         user_agent: userAgent,
@@ -146,6 +126,13 @@ export async function POST(request: Request) {
       .single();
 
     if (insertErr) {
+      // Postgres unique constraint violation — slot was just taken by a concurrent request
+      if ((insertErr as { code?: string }).code === "23505") {
+        return Response.json(
+          { error: "This slot was just booked by someone else. Please select a different time." },
+          { status: 409 }
+        );
+      }
       logger.error("Failed to create reservation", { error: insertErr.message });
       return Response.json({ error: "Failed to create reservation" }, { status: 500 });
     }
@@ -170,19 +157,8 @@ export async function POST(request: Request) {
       status: reservation.status,
     });
 
-    // Send confirmation + admin emails (non-blocking)
-    sendBookingConfirmation({
-      email: data.email,
-      name: `${data.firstName} ${data.lastName}`,
-      confirmationCode,
-      amenityName: amenity.name,
-      date: data.reservationDate,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      amount: amenity.deposit_cents,
-      manageUrl,
-    }).catch((err) => logger.error("Confirmation email failed", { error: String(err) }));
-
+    // Confirmation email is sent by the stripe/webhook/route.ts handler once
+    // payment_intent.succeeded fires. Admin notification fires immediately.
     sendAdminBookingNotification({
       confirmationCode,
       amenityName: amenity.name,
