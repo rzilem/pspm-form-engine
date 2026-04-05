@@ -47,7 +47,8 @@ export async function POST(request: Request) {
         const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
         // Join amenity name and include manage_token in a single query — no N+1
-        const { data: upcoming, error } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: upcoming, error } = await (supabase as any)
           .from("reservations")
           .select("id, confirmation_code, manage_token, resident_name, resident_email, reservation_date, start_time, end_time, amenities(name)")
           .eq("reservation_date", tomorrowStr)

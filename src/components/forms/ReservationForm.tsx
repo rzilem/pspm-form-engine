@@ -52,7 +52,7 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
   void leaseFiles;
 
   const form = useForm<ReservationFormData>({
-    resolver: zodResolver<ReservationFormData>(reservationSchema) as Resolver<ReservationFormData>,
+    resolver: zodResolver(reservationSchema) as Resolver<ReservationFormData>,
     defaultValues: {
       reservationDate: "",
       reservationTime: "",

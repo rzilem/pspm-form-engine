@@ -20,7 +20,8 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseAdmin();
 
-    let query = supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query = (supabase as any)
       .from("reservations")
       .select("*, amenities(name, slug, community)", { count: "exact" });
 
@@ -52,13 +53,15 @@ export async function GET(request: Request) {
         "Confirmation Code", "Date", "Start", "End", "Name", "Email", "Phone",
         "Status", "Amount", "Stripe Status", "Created",
       ];
-      const rows = data.map((r) => [
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows = data.map((r: any) => [
         r.confirmation_code, r.reservation_date, r.start_time, r.end_time,
         r.resident_name, r.resident_email, r.resident_phone ?? "",
         r.status, `$${(r.amount_cents / 100).toFixed(2)}`, r.stripe_status, r.created_at,
       ]);
 
-      const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const csv = [headers.join(","), ...rows.map((r: any[]) => r.map((v: any) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
 
       return new Response(csv, {
         headers: {

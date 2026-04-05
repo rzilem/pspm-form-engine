@@ -225,6 +225,33 @@ export interface Database {
         };
         Relationships: [];
       };
+      form_submissions: {
+        Row: {
+          id: string;
+          form_slug: string;
+          data: Record<string, unknown>;
+          ip_address: string | null;
+          user_agent: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          form_slug: string;
+          data: Record<string, unknown>;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          form_slug?: string;
+          data?: Record<string, unknown>;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       slot_holds: {
         Row: {
           id: string;
