@@ -124,9 +124,12 @@ export async function POST(request: Request) {
     });
 
     if (formSlug === "proposal") {
-      pushLeadToCrm(submission.id, formResult.data as Record<string, unknown>).catch((err) => {
-        logger.error("intake-lead non-blocking failure", { error: String(err) });
-      });
+      // Await on Cloud Run — fire-and-forget gets killed when the response returns
+      try {
+        await pushLeadToCrm(submission.id, formResult.data as Record<string, unknown>);
+      } catch (err) {
+        logger.error("intake-lead failed", { error: String(err) });
+      }
     }
 
     logger.info("Form submission saved", {
