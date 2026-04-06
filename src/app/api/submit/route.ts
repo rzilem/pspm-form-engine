@@ -12,6 +12,33 @@ import { sendFormNotification } from "@/lib/email";
 import { verifyRecaptcha } from "@/lib/recaptcha";
 import type { z } from "zod";
 
+
+async function pushLeadToCrm(submissionId: string, data: Record<string, unknown>) {
+  const url = process.env.CRM_INTAKE_URL || "https://mksbigirgonwnzlfdndd.supabase.co/functions/v1/intake-lead";
+  const key = process.env.CRM_INTAKE_KEY || "intake-lead-2026-bigcountry-x9k4m7p2q8";
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": key },
+      body: JSON.stringify({
+        first_name: data.firstName, last_name: data.lastName,
+        email: data.email, phone: data.phone,
+        association_name: data.associationName, units: data.numberOfUnits,
+        street: data.streetAddress, city: data.city, state: data.state, zip: data.zip,
+        proposal_type: data.proposalType, current_status: data.currentStatus,
+        features: data.features, additional_info: data.additionalInfo,
+        source: "psprop.net", form_submission_id: submissionId,
+      }),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      logger.error("intake-lead failed", { status: res.status, body: txt.slice(0, 300) });
+    }
+  } catch (err) {
+    logger.error("intake-lead threw", { error: String(err) });
+  }
+}
+
 // Map form slugs to their validation schemas
 const formSchemas: Record<string, z.ZodType<unknown>> = {
   proposal: proposalFormSchema,
@@ -95,6 +122,12 @@ export async function POST(request: Request) {
     sendFormNotification(formSlug, formResult.data as Record<string, unknown>).catch((err) => {
       logger.error("Email notification failed", { error: String(err), formSlug });
     });
+
+    if (formSlug === "proposal") {
+      pushLeadToCrm(submission.id, formResult.data as Record<string, unknown>).catch((err) => {
+        logger.error("intake-lead non-blocking failure", { error: String(err) });
+      });
+    }
 
     logger.info("Form submission saved", {
       formSlug,
