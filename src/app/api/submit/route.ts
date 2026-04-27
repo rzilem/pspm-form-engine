@@ -120,10 +120,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "Failed to save submission" }, { status: 500 });
     }
 
-    // Send email notification (non-blocking)
-    sendFormNotification(formSlug, formResult.data as Record<string, unknown>).catch((err) => {
+    // Await on Cloud Run — fire-and-forget background work gets cut off
+    // by CPU throttling once the response returns. Insurance form generates
+    // a carrier XLSX attachment that must complete before we acknowledge.
+    try {
+      await sendFormNotification(formSlug, formResult.data as Record<string, unknown>);
+    } catch (err) {
       logger.error("Email notification failed", { error: String(err), formSlug });
-    });
+    }
 
     if (formSlug === "proposal") {
       // Await on Cloud Run — fire-and-forget gets killed when the response returns

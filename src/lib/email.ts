@@ -1,6 +1,8 @@
 import { Resend } from "resend";
 import { logger } from "@/lib/logger";
 import { formatTime12h } from "@/lib/booking";
+import { populateCarrierWorkbook } from "@/lib/insurance-xlsx";
+import type { InsuranceFormData } from "@/lib/schemas-insurance";
 
 function escapeHtml(str: string): string {
   return str
@@ -35,16 +37,21 @@ export async function sendFormNotification(
     return;
   }
 
-  const { to, subject, body } = config(data);
+  const { to, subject, body, attachments } = await config(data);
 
   await resend.emails.send({
     from: FROM_EMAIL,
     to,
     subject,
     html: wrapHtml(subject, body),
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
   });
 
-  logger.info("Form notification email sent", { formSlug, to });
+  logger.info("Form notification email sent", {
+    formSlug,
+    to,
+    attachmentCount: attachments?.length ?? 0,
+  });
 }
 
 /** Send booking confirmation email */
@@ -198,13 +205,23 @@ export async function sendCancellationEmail(params: {
 
 // ── Form-specific email configs ──────────────────────────────────────
 
+interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+}
+
 interface EmailConfig {
   to: string[];
   subject: string;
   body: string;
+  attachments?: EmailAttachment[];
 }
 
-const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => EmailConfig> = {
+type EmailConfigBuilder = (
+  data: Record<string, unknown>,
+) => EmailConfig | Promise<EmailConfig>;
+
+const FORM_EMAIL_CONFIG: Record<string, EmailConfigBuilder> = {
   proposal: (data) => ({
     to: ["rickyz@psprop.net"],
     subject: `New Management Proposal Request — ${data.associationName ?? "Unknown"}`,
@@ -260,17 +277,22 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
     `,
   }),
 
-  insurance: (data) => {
-    // Insurance submission: data.flat contains 80+ form fields, data.buildings is array.
-    // Email lists every populated field so staff can review before generating carrier XLSX.
+  insurance: async (data) => {
+    // Insurance submission: data.flat has 80+ fields, data.buildings is array.
+    // Body lists every populated field for staff review; XLSX attachment is the
+    // actual carrier-ready file (carrier wants their template format).
     const flat = (data.flat ?? {}) as Record<string, string>;
-    const buildings = Array.isArray(data.buildings) ? (data.buildings as Array<Record<string, string>>) : [];
+    const buildings = Array.isArray(data.buildings)
+      ? (data.buildings as Array<Record<string, string>>)
+      : [];
     const legalName = flat.legal_name || "Unknown Association";
     const renderRow = (k: string, v: string) =>
       v && v.trim() !== ""
         ? `<tr><td style="padding:4px 12px;font-weight:600;vertical-align:top">${escapeHtml(k)}</td><td style="padding:4px 12px;vertical-align:top">${escapeHtml(v)}</td></tr>`
         : "";
-    const flatRows = Object.entries(flat).map(([k, v]) => renderRow(k, String(v ?? ""))).join("");
+    const flatRows = Object.entries(flat)
+      .map(([k, v]) => renderRow(k, String(v ?? "")))
+      .join("");
     const buildingBlocks = buildings
       .map((b, i) => {
         const inner = Object.entries(b)
@@ -281,19 +303,48 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
           : "";
       })
       .join("");
+
     const carrierEmail = process.env.INSURANCE_CARRIER_EMAIL?.trim();
     const recipients = ["insurance@psprop.net", "rickyz@psprop.net"];
     if (carrierEmail) recipients.push(carrierEmail);
+
+    // Generate the carrier-format XLSX. If population fails (corrupt template,
+    // missing sheet, etc.), still send the email with submission detail so the
+    // intake isn't silently lost — staff can regenerate from form_submissions.
+    const attachments: EmailAttachment[] = [];
+    let attachmentNote = "";
+    try {
+      const xlsxBuffer = await populateCarrierWorkbook(data as unknown as InsuranceFormData);
+      const safeName = legalName.replace(/[^A-Za-z0-9 _.-]/g, "").replace(/\s+/g, "_").slice(0, 60) || "Submission";
+      const today = new Date().toISOString().slice(0, 10);
+      attachments.push({
+        filename: `HOA_Insurance_Intake_${safeName}_${today}.xlsx`,
+        content: xlsxBuffer,
+      });
+    } catch (err) {
+      logger.error("Insurance XLSX populate failed — sending email without attachment", {
+        error: err instanceof Error ? err.message : String(err),
+        legalName,
+      });
+      attachmentNote = `<p style="color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:12px;border-radius:6px"><strong>Note:</strong> The carrier XLSX failed to generate automatically. Submission detail is below; staff can regenerate from <code>form_submissions</code>.</p>`;
+    }
+
+    const attachedBlurb = attachments.length > 0
+      ? `<p>The carrier-ready XLSX is attached to this email. Review the field detail below before forwarding to the carrier.</p>`
+      : `<p>Review and convert to a carrier-ready XLSX/PDF in the staff onboarding portal before forwarding to the carrier.</p>`;
+
     return {
       to: recipients,
       subject: `New Business Insurance Intake — ${legalName}`,
       body: `
         <p>A new HOA insurance intake has been submitted via psprop.net forms.</p>
-        <p style="color:#666">Review and convert to a carrier-ready XLSX/PDF in the staff onboarding portal if you intend to bind this policy.</p>
+        ${attachedBlurb}
+        ${attachmentNote}
         <h3 style="margin:20px 0 4px 0;color:#1B4F72">Submission Detail</h3>
         <table style="border-collapse:collapse">${flatRows}</table>
         ${buildingBlocks}
       `,
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
   },
 };

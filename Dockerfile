@@ -34,6 +34,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Carrier XLSX template — read at runtime by /api/submit (insurance form)
+# via process.cwd() + templates/hoa-new-business-template.xlsx.
+COPY --from=builder --chown=nextjs:nodejs /app/templates ./templates
+
 USER nextjs
 EXPOSE 8080
 
