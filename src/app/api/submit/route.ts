@@ -6,6 +6,7 @@ import {
   falconPointeSchema,
   reservationSchema,
 } from "@/lib/schemas";
+import { insuranceFormSchema } from "@/lib/schemas-insurance";
 import { logger } from "@/lib/logger";
 import { getSupabase } from "@/lib/supabase";
 import { sendFormNotification } from "@/lib/email";
@@ -47,6 +48,7 @@ const formSchemas: Record<string, z.ZodType<unknown>> = {
   "falcon-pointe-portal": falconPointeSchema,
   "indoor-reservation": reservationSchema,
   "pavilion-reservation": reservationSchema,
+  insurance: insuranceFormSchema,
 };
 
 export async function POST(request: Request) {

@@ -259,6 +259,43 @@ const FORM_EMAIL_CONFIG: Record<string, (data: Record<string, unknown>) => Email
       </table>
     `,
   }),
+
+  insurance: (data) => {
+    // Insurance submission: data.flat contains 80+ form fields, data.buildings is array.
+    // Email lists every populated field so staff can review before generating carrier XLSX.
+    const flat = (data.flat ?? {}) as Record<string, string>;
+    const buildings = Array.isArray(data.buildings) ? (data.buildings as Array<Record<string, string>>) : [];
+    const legalName = flat.legal_name || "Unknown Association";
+    const renderRow = (k: string, v: string) =>
+      v && v.trim() !== ""
+        ? `<tr><td style="padding:4px 12px;font-weight:600;vertical-align:top">${escapeHtml(k)}</td><td style="padding:4px 12px;vertical-align:top">${escapeHtml(v)}</td></tr>`
+        : "";
+    const flatRows = Object.entries(flat).map(([k, v]) => renderRow(k, String(v ?? ""))).join("");
+    const buildingBlocks = buildings
+      .map((b, i) => {
+        const inner = Object.entries(b)
+          .map(([k, v]) => renderRow(k, String(v ?? "")))
+          .join("");
+        return inner
+          ? `<h3 style="margin:20px 0 4px 0;color:#1B4F72">Building ${i + 1}</h3><table style="border-collapse:collapse">${inner}</table>`
+          : "";
+      })
+      .join("");
+    const carrierEmail = process.env.INSURANCE_CARRIER_EMAIL?.trim();
+    const recipients = ["insurance@psprop.net", "rickyz@psprop.net"];
+    if (carrierEmail) recipients.push(carrierEmail);
+    return {
+      to: recipients,
+      subject: `New Business Insurance Intake — ${legalName}`,
+      body: `
+        <p>A new HOA insurance intake has been submitted via psprop.net forms.</p>
+        <p style="color:#666">Review and convert to a carrier-ready XLSX/PDF in the staff onboarding portal if you intend to bind this policy.</p>
+        <h3 style="margin:20px 0 4px 0;color:#1B4F72">Submission Detail</h3>
+        <table style="border-collapse:collapse">${flatRows}</table>
+        ${buildingBlocks}
+      `,
+    };
+  },
 };
 
 // ── HTML wrapper ─────────────────────────────────────────────────────
