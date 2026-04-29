@@ -117,16 +117,24 @@ export default function FormsAdminPage() {
       title="Forms"
       subtitle="Manage published forms, edit field schema, and route submissions."
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <p className="text-sm text-muted">
           {forms.length} form{forms.length === 1 ? "" : "s"} total
         </p>
-        <Link
-          href="/admin/forms/new"
-          className="inline-flex items-center gap-2 rounded-[8px] bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover no-underline"
-        >
-          + New form
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/forms/import-gf"
+            className="inline-flex items-center gap-2 rounded-[8px] border border-border bg-white px-4 py-2 text-sm font-medium text-foreground hover:border-primary no-underline"
+          >
+            Import from Gravity Forms
+          </Link>
+          <Link
+            href="/admin/forms/new"
+            className="inline-flex items-center gap-2 rounded-[8px] bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover no-underline"
+          >
+            + New form
+          </Link>
+        </div>
       </div>
 
       {error && (
