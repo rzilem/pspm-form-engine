@@ -110,13 +110,49 @@ Apply via `supabase db push --linked` against the linked project, OR via `mcp__c
 | 3 | Submissions admin dashboard | ✅ done | [#3](https://github.com/rzilem/pspm-form-engine/pull/3) | Filters, CSV, status pills. 864 LOC. |
 | 1.3 | File uploads + signatures | ✅ done | [#5](https://github.com/rzilem/pspm-form-engine/pull/5) | Private bucket + signed URLs + signature_pad inline. ~700 LOC. |
 | 4 | Workflow engine (Gravity Flow replacement) | ✅ done | [#6](https://github.com/rzilem/pspm-form-engine/pull/6) | Sequential approvals, magic-link tokens, audit timeline. ~1,550 LOC. |
-| 4.5 | Gravity Forms JSON importer | ✅ done | [#7](https://github.com/rzilem/pspm-form-engine/pull/7) | Bulk import GF exports as drafts. ~820 LOC. |
+| 4.5 | Gravity Forms JSON importer | ✅ done | [#7](https://github.com/rzilem/pspm-form-engine/pull/7) + [#8](https://github.com/rzilem/pspm-form-engine/pull/8) | Bulk import GF exports as drafts. PR #7 merged + 4 follow-up commits during pre-merge dry-run review. PR #8 followed up with REST API shape fix (empty `choices: ""`/`inputs: null` rejected 26/28 forms). |
 | 4.1 | Workflow refinements (parallel/conditional, admin resend) | ⏳ deferred | — | Schema is forward-compatible; can add later. |
-| 5 | Migrate simple intake forms (batch 1) | 🟡 ready | — | **BLOCKED on GF export from psprop.net.** Use importer. |
-| 6 | Migrate payment-plan + letter-template forms | 🟡 ready | — | **BLOCKED on GF export.** Needs PDF + workflow. |
-| 7 | Migrate workflow forms (batch 3) | 🟡 ready | — | **BLOCKED on GF export.** Needs workflow_config wired per form. |
-| 8 | Replace Elementor+EmailJS on `/contact-us-main` and `/vendor` | 🟡 ready | — | Update WP page templates; iframe `/forms/contact-us` and `/forms/vendor`. |
+| 5 | Migrate simple intake forms (batch 1) | 🟡 in progress | — | **13 drafts created 2026-04-29 via live import.** All status=draft, need per-form review before publish. See "Drafts to review" section below. |
+| 6 | Migrate payment-plan + letter-template forms | 🟡 in progress | — | Letter Template + Manager Letter Template Tool drafts exist; need `pdf_config.enabled=true` set. Test of Payment Plan form drafted but field-light (only 2 imported, others were html separators or pdfpreview). |
+| 7 | Migrate workflow forms (batch 3) | 🟡 in progress | — | Vendor Application Form for HOA + Function Request drafts exist; need `workflow_config.steps` wired per form. |
+| 8 | Replace Elementor+EmailJS on `/contact-us-main` and `/vendor` | ⏳ blocked | — | Blocked on Phase 5 publish (contact-us) + Phase 7 publish (vendor app). |
 | 9 | Retire Gravity Forms ecosystem | ⏳ blocked | — | Deactivate GF + addons in WP after all migrations complete. |
+
+## Drafts created via live import (2026-04-29)
+
+13 form_definitions rows now exist in `hthaomwoizcyfeduptqm.form_definitions` with status='draft'. Public access 404s until published.
+
+| GF id | Slug | Title | Fields | Rules | Notes for review |
+|-------|------|-------|--------|-------|------------------|
+| 4 | `contact-us` | Contact US | 6 | 1 | 1 captcha field skipped (we use reCAPTCHA via env). Recipients: info@psprop.net + cloudmailin webhook — verify both still wanted. |
+| 5 | `pool-signature-form` | Pool Signature Form | 3 | 0 | username + password fields skipped. `{admin_email}` recipient dropped — add real email. Has `signature` field; wire to PDF if needed. |
+| 7 | `condominium-request-form-type-1` | Condominium Request Form - Type 1 | 4 | 0 | Send-To-Field notification points at deleted GF field id 2; admin must add a real recipient. Has `fileupload` field. |
+| 8 | `test-of-payment-plan-form` | Test of Payment Plan form | 2 | 0 | Looks like an abandoned test draft on GF side. Decide: rebuild, or delete. |
+| 14 | `bid-request-system` | Bid Request System | 38 | 2 | **MAJOR**: 51 `image_choice` fields skipped (Gravity Wiz feature, no equivalent in form-engine). Plus 4 page breaks + merge_pdfs/pdfpreview. Form has 2 working notification rules (`{Community Name:1:value}` modifier-tag + literal email). Likely needs manual rebuild or stays on GF. |
+| 15 | `letter-template` | Letter Template | 5 | 1 | 5 warnings: multi_choice + time + list + html + pdfpreview skipped. Needs `pdf_config.enabled=true` per Phase 6. |
+| 24 | `eastwood-at-riverside-community-dog-park-survey` | Eastwood at Riverside Community Dog Park Survey | 3 | 0 | 1 html skipped. Survey-only; no notification originally. Add a recipient if the answers should be emailed. |
+| 27 | `manager-letter-template-tool` | Manager Letter Template Tool | 1 | 0 | 3 html separators skipped. `{admin_email}` recipient dropped. Needs `pdf_config.enabled=true`. |
+| 29 | `board-member-reimbursement` | Board Member Reimbursement | 4 | 1 | 3 product/merge_pdfs/pdfpreview skipped. Recipient: invoices@psprop.net. Likely needs `pdf_config.enabled=true` + `workflow_config` (board approval). |
+| 32 | `falcon-pointe-hoa-pool-form` | Falcon Pointe HOA Pool Form | 9 | 1 | `{admin_email}` recipient dropped. Has Send-To-Field notification → user confirmation. |
+| 34 | `falcon-pointe-website-form` | Falcon Pointe Website Form | 5 | 2 | Recipients: pspm-24@messages.vantaca.com (Vantaca task gateway) + Send-To-Field user confirmation. |
+| 35 | `function-request-and-reservation-agreement` | Function Request and Reservation Agreement | 13 | 0 | 7 multi_choice + html skipped. **No notifications imported** — original GF form had none. Add a recipient before publish OR mark for replacement. |
+| 40 | `vendor-application-form-for-hoa-and-condo-management` | Vendor Application Form for HOA and Condo Management | 11 | 0 | 1 multi_choice skipped. **No notifications imported.** This is the canonical vendor form (replaces #6 + #13 stubs). Needs `workflow_config.steps` (vendor approval) per Phase 7. |
+
+### Forms NOT migrated (intentional)
+
+**Legacy hand-coded slugs** (different code path in `src/lib/schemas.ts`, kept on existing routes):
+- #3 Request a Management Proposal → `/proposal`
+- #10 Invoicing System / #11 Utility Bill / #31 CI Invoice → `/invoice`
+- #28 Manager Billback Tool → `/billback`
+- #33 Falcon Pointe Portal Request Form → `/falcon-pointe-portal`
+- #36 Pool Pavilion Reservation → `/pavilion-reservation`
+- #38 Indoor Gathering Room Reservation → `/indoor-reservation`
+
+**Tests / abandoned drafts:**
+- #12 Email Test, #18 Board Candidate Questionnaire (0 fields), #21 Test 123, #26 Notification Shortcode Form, #42 Test (0 fields)
+
+**Duplicate vendor stubs** (canonical is #40):
+- #6 Vendor Application (1 field), #13 Vendor Application (1) (3 fields, page-broken)
 
 ## Stacked PR dependency tree
 
@@ -141,34 +177,45 @@ After merging PR #2, GitHub will auto-rebase #3's base to master. Repeat per PR.
 | `C:\Users\ricky\pspm-form-engine\` | master | Reference checkout. Untouched. |
 | `C:\Users\ricky\pspm-form-engine-builder-wt\` | docs/milestone-plan (this PR) | Active work. Was on feat/form-gf-importer. |
 
-## Operational migration checklist (after PRs land)
+## Operational migration checklist
 
-1. **Merge PRs bottom-up** (#2 → #3 → #4 → #5 → #6 → #7).
-2. **Apply 4 migrations** to `hthaomwoizcyfeduptqm` in order.
-3. **Verify env vars** on `pspm-form-engine` Cloud Run:
-   - `RESEND_API_KEY` — already set
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — already set
-   - `ADMIN_PASSWORD` — already set
-   - `ADMIN_NOTIFY_EMAIL` — set to `rickyz@psprop.net` (used as workflow admin_fallback)
-   - `NEXT_PUBLIC_APP_URL` — **set to `https://pspm-form-engine-138752496729.us-central1.run.app`** (drives workflow magic links). Add to cloudbuild.yaml substitutions.
-4. **Deploy** via `gcloud builds submit --config=cloudbuild.yaml`. Verify `/admin/forms` loads.
-5. **Export Gravity Forms JSON** from psprop.net: WP admin → Forms → Import/Export → Export Forms → select all → Download.
-6. **Run importer** at `/admin/forms/import-gf`. Paste JSON, preview, fix slugs, create drafts.
-7. **Per-form review** in `/admin/forms/[id]/edit`:
+Status as of 2026-04-29 18:00 UTC — through step 6 done in one session.
+
+1. ✅ **Merge PRs bottom-up** (#2 → #3 → #4 → #5 → #6 → #7). Done; rebase-onto-master pattern needed because squash-merge lost original commit hashes.
+2. ✅ **Apply 4 migrations** to `hthaomwoizcyfeduptqm`. Done via `mcp__claude_ai_Supabase__apply_migration`.
+3. ✅ **Env vars** set on Cloud Run:
+   - `NEXT_PUBLIC_APP_URL=https://pspm-form-engine-138752496729.us-central1.run.app`
+   - `ADMIN_NOTIFY_EMAIL=rickyz@psprop.net`
+   - All others pre-existing (Resend, Supabase, ADMIN_PASSWORD).
+4. ✅ **Deploy** via `gcloud run deploy pspm-form-engine --source .` (no cloudbuild.yaml exists; uses Cloud Run's auto-build from Dockerfile). Initial rev `00010-bxs`, then `00011-ptl` after PR #8 (REST API shape fix).
+5. ✅ **Pull GF forms** from psprop.net via `GET /wp-json/gf/v2/forms/<id>` with WP application password basic auth. 28 form schemas in `.planning/gf-export/`.
+6. ✅ **Run importer** — 13 drafts created, 15 skipped (legacy/test/dupe). See "Drafts created" section above.
+7. ⏳ **Per-form review** in `/admin/forms/[id]/edit` for each of the 13 drafts:
    - Spot-check field_schema (especially anything that triggered an importer warning).
-   - Update notification_config recipients (importer maps GF merge tags but admin should verify).
-   - Set `pdf_config.enabled=true` for payment-plan / letter-template forms that previously used Gravity PDF.
-   - For approval workflows (vendor onboarding, payment plan, signed agreements): write `workflow_config.steps` JSON.
-8. **Test end-to-end** for each form before publishing:
-   - Submit a test entry → verify row in `form_submissions`.
-   - Verify notification email arrives.
-   - For workflowed forms: verify magic link works, approve advances, reject terminates.
-9. **Publish** each form (status: published). The slug becomes live at `/forms/<slug>`.
-10. **Update WordPress** to embed/link to the new URLs:
-    - For `[gravityform id=N]` shortcodes: replace with `<iframe src="https://pspm-form-engine.../forms/<slug>">` or update the page template.
-    - For `/contact-us-main` and `/vendor` (currently Elementor + EmailJS): replace the form widget with the iframe.
-11. **Verify** for a few days. Check submissions inbox + emails.
-12. **Retire GF**: deactivate Gravity Forms + Gravity Flow + Gravity PDF + Gravity Wiz + GF reCAPTCHA + GF AI plugins. Don't delete yet — keep around for 30 days in case rollback needed. After 30 days, delete.
+   - Add real recipient(s) where notif-warn ≥ 1 (importer dropped `{admin_email}` etc.).
+   - Set `pdf_config.enabled=true` for: `letter-template`, `manager-letter-template-tool`, `board-member-reimbursement`.
+   - Wire `workflow_config.steps` for: `vendor-application-form-for-hoa-and-condo-management` (vendor approval), `function-request-and-reservation-agreement` (board approval if needed), `board-member-reimbursement` (board approval).
+   - Decision needed: `bid-request-system` migrate or stay on GF (51 image_choice fields lost); `test-of-payment-plan-form` rebuild or delete.
+8. ⏳ **Test end-to-end** for each form before publishing.
+9. ⏳ **Publish** each form (status: published).
+10. ⏳ **Update WordPress** to point `[gravityform id=N]` shortcodes + `/contact-us-main` + `/vendor` Elementor pages at the new URLs.
+11. ⏳ **Verify** in production for 30 days.
+12. ⏳ **Retire GF**: deactivate (don't delete) GF + Flow + PDF + Wiz + reCAPTCHA + AI plugins.
+
+## Importer follow-up commits shipped during this session
+
+PR #7's branch picked up 3 commits BEFORE merge after the live-export dry-run found bugs:
+1. `db6d999` — warn on dropped notification recipients (`{admin_email}`, bare numerics) + tolerate `:modifier` merge tags
+2. `8dd054b` — map GF Send-To-Field notifications to `{{field.<id>}}` + split warning categories (`field` vs `notification`)
+3. `4642089` — handle Send-To-Field with only `toField` populated (was early-exiting at `if (!rawTo)` guard)
+
+Then PR #8 followed up on master after the live import endpoint surfaced a different shape mismatch:
+4. `b7c7d41` — accept GF v2 REST API empty-as-string/null shape for `choices`/`inputs` (z.preprocess wrapping)
+
+Net importer recovery on the live psprop.net export:
+- Before any fixes: ~16 forms with no notifications (silent drops)
+- After fixes: 13 forms still need a real recipient added (true admin-decisions, not silent drops)
+- Forms recoverable via importer: 13 of 28 (the rest are legacy or tests)
 
 ## Known limits / open questions
 
