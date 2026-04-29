@@ -27,7 +27,12 @@ interface PreviewForm {
   field_schema: unknown[];
   notification_config: { rules: { recipients: string[]; subject: string }[] };
   confirmation_message: string;
-  warnings: { fieldLabel: string; fieldType: string; reason: string }[];
+  warnings: {
+    fieldLabel: string;
+    fieldType: string;
+    reason: string;
+    category: "field" | "notification";
+  }[];
   slugReserved: boolean;
 }
 
@@ -232,22 +237,36 @@ export default function ImportGfPage() {
                         {f.notification_config.rules.length} notification rule
                         {f.notification_config.rules.length === 1 ? "" : "s"}
                       </p>
-                      {f.warnings.length > 0 && (
-                        <details className="mt-2 text-xs">
-                          <summary className="cursor-pointer text-yellow-700">
-                            {f.warnings.length} field
-                            {f.warnings.length === 1 ? "" : "s"} skipped
-                          </summary>
-                          <ul className="mt-1 pl-4 list-disc text-muted">
-                            {f.warnings.map((w, i) => (
-                              <li key={i}>
-                                <strong>{w.fieldLabel}</strong> ({w.fieldType}):{" "}
-                                {w.reason}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      )}
+                      {f.warnings.length > 0 && (() => {
+                        const fieldWarnings = f.warnings.filter((w) => w.category === "field");
+                        const notifWarnings = f.warnings.filter((w) => w.category === "notification");
+                        const summaryParts: string[] = [];
+                        if (fieldWarnings.length > 0) {
+                          summaryParts.push(
+                            `${fieldWarnings.length} field${fieldWarnings.length === 1 ? "" : "s"} skipped`,
+                          );
+                        }
+                        if (notifWarnings.length > 0) {
+                          summaryParts.push(
+                            `${notifWarnings.length} notification recipient${notifWarnings.length === 1 ? "" : "s"} dropped`,
+                          );
+                        }
+                        return (
+                          <details className="mt-2 text-xs">
+                            <summary className="cursor-pointer text-yellow-700">
+                              {summaryParts.join(" · ")}
+                            </summary>
+                            <ul className="mt-1 pl-4 list-disc text-muted">
+                              {f.warnings.map((w, i) => (
+                                <li key={i}>
+                                  <strong>{w.fieldLabel}</strong> ({w.fieldType}):{" "}
+                                  {w.reason}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        );
+                      })()}
                     </div>
                   </label>
                 </li>

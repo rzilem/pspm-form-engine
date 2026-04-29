@@ -51,6 +51,9 @@ const gfNotificationSchema = z
     name: z.string().optional(),
     to: z.string().optional(),
     toType: z.string().optional(),
+    // `toField` is set when `toType === "field"`; mirrors `to` in modern
+    // GF exports but kept separately here so we can read either source.
+    toField: z.union([z.string(), z.number()]).optional(),
     subject: z.string().optional(),
     message: z.string().optional(),
     isActive: z.unknown().optional(),
@@ -156,10 +159,17 @@ const FIELD_TYPE_MAP: Record<string, FieldDefinition["type"] | null> = {
   html: null,
 };
 
+// `category` lets the import preview render field-level vs notification-
+// level warnings as distinct lists with accurate counts. Any caller that
+// just iterates the array still sees every warning; only the UI surfaces
+// the split.
+type ImportWarningCategory = "field" | "notification";
+
 interface ImportWarning {
   fieldLabel: string;
   fieldType: string;
   reason: string;
+  category: ImportWarningCategory;
 }
 
 export interface ImportResult {
@@ -205,6 +215,7 @@ function mapField(
       fieldLabel: gf.label ?? `(field ${idx})`,
       fieldType: gf.type,
       reason: "Unknown GF field type — skipped",
+      category: "field",
     });
     return null;
   }
@@ -213,6 +224,7 @@ function mapField(
       fieldLabel: gf.label ?? `(field ${idx})`,
       fieldType: gf.type,
       reason: "GF type has no equivalent in form-engine — skipped",
+      category: "field",
     });
     return null;
   }
@@ -255,6 +267,7 @@ function mapField(
       reason: `Field failed validation: ${parsed.error.issues
         .map((i) => i.message)
         .join("; ")}`,
+      category: "field",
     });
     return null;
   }
@@ -277,12 +290,36 @@ function mapNotifications(
     const rawTo = (n.to ?? "").toString();
     if (!rawTo) continue;
     const ruleName = (n.name ?? n.subject ?? "(unnamed notification)").toString().slice(0, 80);
-    // GF supports `to` as either a literal email, comma-separated emails,
-    // or a merge tag like `{Email:3}` referring to a field id. Translate
-    // merge tags to {{field.<id>}} when the id matches a known field.
-    // Tag forms in the wild include `{Email:3}` and `{Community Name:1:value}`
-    // — the optional `:modifier` suffix needs to be tolerated, otherwise
-    // recipients get silently dropped.
+    const isToTypeField = (n.toType ?? "").toString().toLowerCase() === "field";
+    // GF "Send To Field" mode: the export sets `toType: "field"` and
+    // stores the email field's numeric id in `to` (or `toField`). Map that
+    // to a `{{field.<id>}}` token when the id is in the imported schema.
+    // Without this branch user-confirmation rules from forms #7/#32/etc.
+    // would all silently drop because `to: "2"` is bare numeric.
+    if (isToTypeField) {
+      const fieldId = String(n.toField ?? n.to ?? "").trim();
+      if (fieldId && fields.find((f) => f.id === fieldId)) {
+        rules.push({
+          recipients: [`{{field.${fieldId}}}`],
+          subject: ((n.subject ?? "").slice(0, 300) || "Form submission"),
+        });
+        continue;
+      }
+      // toType=field but the id doesn't resolve — nothing portable here.
+      warnings.push({
+        fieldLabel: ruleName,
+        fieldType: "notification.to",
+        reason: `Send-to-field notification points at field id ${fieldId || "(blank)"} which is not in the imported field schema — recipient dropped`,
+        category: "notification",
+      });
+      continue;
+    }
+    // GF also supports `to` as either a literal email, comma-separated
+    // emails, or a merge tag like `{Email:3}` referring to a field id.
+    // Translate merge tags to {{field.<id>}} when the id matches a known
+    // field. Tag forms in the wild include `{Email:3}` and
+    // `{Community Name:1:value}` — the optional `:modifier` suffix needs
+    // to be tolerated, otherwise recipients get silently dropped.
     const tagRe = /\{[^:}]+:(\d+)(?::[^}]*)?\}/;
     const recipients: string[] = [];
     for (const part of rawTo.split(",")) {
@@ -301,6 +338,7 @@ function mapNotifications(
           fieldLabel: ruleName,
           fieldType: "notification.to",
           reason: `Merge tag "${trimmed}" references field id ${tagMatch[1]} which is not in the imported field schema — recipient dropped`,
+          category: "notification",
         });
         continue;
       }
@@ -319,6 +357,7 @@ function mapNotifications(
         fieldLabel: ruleName,
         fieldType: "notification.to",
         reason: `Recipient "${trimmed}" has no portable form-engine equivalent — add a real email in the form editor before publishing`,
+        category: "notification",
       });
     }
     if (recipients.length === 0) {
