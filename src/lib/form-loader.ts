@@ -10,6 +10,7 @@ import {
   type FormDefinition,
   fieldDefinitionSchema,
   notificationConfigSchema,
+  pdfConfigSchema,
 } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
@@ -58,12 +59,16 @@ export async function loadFormDefinition(
     .array(fieldDefinitionSchema)
     .safeParse(data.field_schema);
   const notifResult = notificationConfigSchema.safeParse(data.notification_config);
+  // pdf_config defaults inside the schema, so a missing/null column from
+  // a pre-Phase-2 row is fine — it falls back to {enabled:false}.
+  const pdfResult = pdfConfigSchema.safeParse(data.pdf_config ?? {});
 
-  if (!fieldsResult.success || !notifResult.success) {
+  if (!fieldsResult.success || !notifResult.success || !pdfResult.success) {
     logger.error("Form definition failed schema validation", {
       slug: normalized,
       fieldErrors: fieldsResult.success ? null : fieldsResult.error.issues,
       notifErrors: notifResult.success ? null : notifResult.error.issues,
+      pdfErrors: pdfResult.success ? null : pdfResult.error.issues,
     });
     return null;
   }
@@ -72,6 +77,7 @@ export async function loadFormDefinition(
     ...data,
     field_schema: fieldsResult.data,
     notification_config: notifResult.data,
+    pdf_config: pdfResult.data,
   });
   if (!parsed.success) {
     logger.error("Form definition envelope failed validation", {

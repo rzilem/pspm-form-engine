@@ -19,6 +19,7 @@ interface FormDefinitionRow {
   status: "draft" | "published" | "archived";
   field_schema: unknown;
   notification_config: unknown;
+  pdf_config: { enabled?: boolean; template?: string; filenamePrefix?: string } | null;
   confirmation_message: string;
   recaptcha_required: boolean;
   published_at: string | null;
@@ -49,6 +50,8 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [recaptchaRequired, setRecaptchaRequired] = useState(true);
   const [fieldSchemaJson, setFieldSchemaJson] = useState("[]");
   const [notificationConfigJson, setNotificationConfigJson] = useState('{"rules":[]}');
+  const [pdfEnabled, setPdfEnabled] = useState(false);
+  const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -75,6 +78,8 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       setNotificationConfigJson(
         JSON.stringify(data.notification_config ?? { rules: [] }, null, 2),
       );
+      setPdfEnabled(Boolean(data.pdf_config?.enabled));
+      setPdfFilenamePrefix(data.pdf_config?.filenamePrefix ?? "");
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Network error");
     }
@@ -120,6 +125,13 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           recaptcha_required: recaptchaRequired,
           field_schema: fieldSchema,
           notification_config: notificationConfig,
+          pdf_config: {
+            enabled: pdfEnabled,
+            template: "default",
+            ...(pdfFilenamePrefix.trim()
+              ? { filenamePrefix: pdfFilenamePrefix.trim() }
+              : {}),
+          },
         }),
       });
 
@@ -210,6 +222,39 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
               { label: "Disabled (authenticated portals only)", value: "no" },
             ]}
           />
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+            PDF generation
+          </h2>
+          <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={pdfEnabled}
+              onChange={(e) => setPdfEnabled(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+            />
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Generate a branded PDF for each submission
+              </p>
+              <p className="text-xs text-muted mt-1">
+                Attached to the admin notification email. Useful for letter
+                templates, payment plan requests, and anything you'd previously
+                send to Gravity PDF.
+              </p>
+            </div>
+          </label>
+          {pdfEnabled && (
+            <TextInput
+              label="Filename prefix (optional)"
+              value={pdfFilenamePrefix}
+              onChange={(e) => setPdfFilenamePrefix(e.target.value)}
+              placeholder={`${definition.slug}`}
+              helperText="Submission id is appended automatically. Defaults to the form slug."
+            />
+          )}
         </section>
 
         <section className="space-y-2">

@@ -12,7 +12,8 @@ import { getSupabase } from "@/lib/supabase";
 import { sendFormNotification } from "@/lib/email";
 import { verifyRecaptcha } from "@/lib/recaptcha";
 import { loadFormDefinition } from "@/lib/form-loader";
-import { buildSubmissionSchema } from "@/lib/form-definitions";
+import { buildSubmissionSchema, type FormDefinition } from "@/lib/form-definitions";
+import { generateFormPdf, getPdfFilename } from "@/lib/form-pdf";
 import type { z } from "zod";
 
 
@@ -74,11 +75,12 @@ export async function POST(request: Request) {
     const { formSlug, data, recaptchaToken } = envelope.data;
 
     // Resolve the form: legacy hand-coded first, then form_definitions.
-    // We need the definition row for two things downstream: (1) reCAPTCHA
-    // bypass for forms that explicitly disable it, (2) attaching
-    // form_definition_id to the submission for the admin inbox.
+    // We hold onto the definition (for dynamic forms) so downstream stages
+    // — reCAPTCHA bypass, PDF generation, notification routing — don't
+    // each re-query Supabase for the same row.
     let formSchema: z.ZodType<unknown> | null = legacyFormSchemas[formSlug] ?? null;
     let formDefinitionId: string | null = null;
+    let formDefinition: FormDefinition | null = null;
     let recaptchaRequired = true;
 
     if (!formSchema) {
@@ -89,6 +91,7 @@ export async function POST(request: Request) {
       }
       formSchema = buildSubmissionSchema(definition.field_schema);
       formDefinitionId = definition.id;
+      formDefinition = definition;
       recaptchaRequired = definition.recaptcha_required;
     }
 
@@ -140,11 +143,34 @@ export async function POST(request: Request) {
       return Response.json({ error: "Failed to save submission" }, { status: 500 });
     }
 
+    // Generate per-submission PDF when the form opted in. Render before
+    // notifying so the PDF can attach to the email — Cloud Run's CPU
+    // throttling kills any work scheduled after the response returns.
+    let pdfAttachment: { filename: string; content: Buffer } | null = null;
+    if (formDefinition) {
+      const pdfBuffer = await generateFormPdf(
+        formDefinition,
+        formResult.data as Record<string, unknown>,
+        submission.id,
+      );
+      if (pdfBuffer) {
+        pdfAttachment = {
+          filename: getPdfFilename(formDefinition, submission.id),
+          content: pdfBuffer,
+        };
+      }
+    }
+
     // Await on Cloud Run — fire-and-forget background work gets cut off
     // by CPU throttling once the response returns. Insurance form generates
     // a carrier XLSX attachment that must complete before we acknowledge.
     try {
-      await sendFormNotification(formSlug, formResult.data as Record<string, unknown>);
+      await sendFormNotification(
+        formSlug,
+        formResult.data as Record<string, unknown>,
+        formDefinition ?? undefined,
+        pdfAttachment,
+      );
     } catch (err) {
       logger.error("Email notification failed", { error: String(err), formSlug });
     }

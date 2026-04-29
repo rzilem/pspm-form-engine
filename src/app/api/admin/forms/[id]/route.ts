@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger";
 import {
   fieldDefinitionSchema,
   notificationConfigSchema,
+  pdfConfigSchema,
 } from "@/lib/form-definitions";
 import { z } from "zod";
 
@@ -26,6 +27,7 @@ const updateSchema = z.object({
   status: z.enum(["draft", "published", "archived"]).optional(),
   field_schema: z.array(fieldDefinitionSchema).optional(),
   notification_config: notificationConfigSchema.optional(),
+  pdf_config: pdfConfigSchema.optional(),
   confirmation_message: z.string().min(1).max(500).optional(),
   recaptcha_required: z.boolean().optional(),
 });
