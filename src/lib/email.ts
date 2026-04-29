@@ -3,6 +3,12 @@ import { logger } from "@/lib/logger";
 import { formatTime12h } from "@/lib/booking";
 import { populateCarrierWorkbook } from "@/lib/insurance-xlsx";
 import type { InsuranceFormData } from "@/lib/schemas-insurance";
+import { loadFormDefinition } from "@/lib/form-loader";
+import {
+  resolveRecipients,
+  type FormDefinition,
+  type FieldDefinition,
+} from "@/lib/form-definitions";
 
 function escapeHtml(str: string): string {
   return str
@@ -20,10 +26,20 @@ function getResend(): Resend | null {
   return new Resend(RESEND_API_KEY);
 }
 
-/** Send email notification for generic form submissions */
+/** Send email notification for generic form submissions.
+ *
+ * Resolution order:
+ *  1. Legacy hand-coded FORM_EMAIL_CONFIG entry (proposal, invoice, ...)
+ *  2. Dynamic notification_config on form_definitions
+ *
+ * When the resolver in /api/submit already loaded the definition it can
+ * pass it via `definition` to skip the lookup; otherwise we re-fetch by
+ * slug.
+ */
 export async function sendFormNotification(
   formSlug: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  definition?: FormDefinition,
 ): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -31,27 +47,135 @@ export async function sendFormNotification(
     return;
   }
 
-  const config = FORM_EMAIL_CONFIG[formSlug];
-  if (!config) {
-    logger.warn("No email config for form", { formSlug });
+  // Legacy path
+  const legacyConfig = FORM_EMAIL_CONFIG[formSlug];
+  if (legacyConfig) {
+    const { to, subject, body, attachments } = await legacyConfig(data);
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      html: wrapHtml(subject, body),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    });
+    logger.info("Form notification email sent (legacy)", {
+      formSlug,
+      to,
+      attachmentCount: attachments?.length ?? 0,
+    });
     return;
   }
 
-  const { to, subject, body, attachments } = await config(data);
+  // Dynamic path — load the form_definition if not provided
+  const def = definition ?? (await loadFormDefinition(formSlug));
+  if (!def) {
+    logger.warn("No email config and no form_definition for slug", { formSlug });
+    return;
+  }
 
-  await resend.emails.send({
-    from: FROM_EMAIL,
-    to,
-    subject,
-    html: wrapHtml(subject, body),
-    ...(attachments && attachments.length > 0 ? { attachments } : {}),
-  });
+  const rules = def.notification_config.rules ?? [];
+  if (rules.length === 0) {
+    logger.info("form_definition has no notification rules — skipping email", { formSlug });
+    return;
+  }
 
-  logger.info("Form notification email sent", {
+  const body = renderDynamicEmailBody(def, data);
+  let sent = 0;
+
+  for (const rule of rules) {
+    // Conditional gate (e.g. only notify when contactReason == "billing")
+    if (rule.conditional) {
+      const trigger = data[rule.conditional.fieldId];
+      const matches = Array.isArray(rule.conditional.equals)
+        ? rule.conditional.equals.includes(String(trigger ?? ""))
+        : String(trigger ?? "") === rule.conditional.equals;
+      if (!matches) continue;
+    }
+
+    const recipients = resolveRecipients(rule.recipients, data);
+    if (recipients.length === 0) {
+      logger.warn("Notification rule resolved to empty recipient list", {
+        formSlug,
+        rule: rule.subject,
+      });
+      continue;
+    }
+
+    const subject = renderTemplate(rule.subject, data);
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: recipients,
+      subject,
+      html: wrapHtml(subject, body),
+    });
+    sent++;
+  }
+
+  logger.info("Form notification email sent (dynamic)", {
     formSlug,
-    to,
-    attachmentCount: attachments?.length ?? 0,
+    rulesEvaluated: rules.length,
+    rulesSent: sent,
   });
+}
+
+// Render a rule's subject template against submission data.
+// Supports `{{field.<id>}}` mustache references; unknown fields render as
+// the empty string (loud failure would block legitimate emails over a typo).
+function renderTemplate(template: string, data: Record<string, unknown>): string {
+  return template.replace(
+    /\{\{\s*field\.([a-zA-Z0-9_-]+)\s*\}\}/g,
+    (_match, fieldId: string) => {
+      const v = data[fieldId];
+      if (v === undefined || v === null) return "";
+      if (typeof v === "string" || typeof v === "number") return String(v);
+      // Composite fields (name, address) render as space-joined non-empty parts
+      if (typeof v === "object") {
+        return Object.values(v as Record<string, unknown>)
+          .filter((x) => typeof x === "string" && x.trim() !== "")
+          .join(" ");
+      }
+      return "";
+    },
+  );
+}
+
+// Build a generic two-column "label | value" table from any submission.
+// Used by all dynamic forms; per-form HTML customization can be added in
+// a follow-up via a notification_config.template field.
+function renderDynamicEmailBody(
+  def: FormDefinition,
+  data: Record<string, unknown>,
+): string {
+  const rows = def.field_schema
+    .filter((f: FieldDefinition) => f.type !== "section_break")
+    .map((f) => {
+      const raw = data[f.id];
+      const value = formatFieldValue(raw);
+      if (!value) return "";
+      return `<tr>
+        <td style="padding:6px 12px;font-weight:600;vertical-align:top;border-bottom:1px solid #f0f0f0">${escapeHtml(f.label)}</td>
+        <td style="padding:6px 12px;vertical-align:top;border-bottom:1px solid #f0f0f0">${escapeHtml(value)}</td>
+      </tr>`;
+    })
+    .join("");
+  return `
+    <p>A new submission was received for <strong>${escapeHtml(def.title)}</strong>.</p>
+    <table style="border-collapse:collapse;margin:16px 0;min-width:300px">${rows}</table>
+  `;
+}
+
+function formatFieldValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ");
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>)
+      .filter((x) => x !== null && x !== undefined && String(x).trim() !== "")
+      .map((x) => String(x))
+      .join(" ");
+  }
+  return "";
 }
 
 /** Send booking confirmation email */
