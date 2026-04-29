@@ -264,6 +264,7 @@ function mapField(
 function mapNotifications(
   notifs: GfFormPart["notifications"],
   fields: FieldDefinition[],
+  warnings: ImportWarning[],
 ): NotificationConfig {
   if (!notifs) return { rules: [] };
 
@@ -275,21 +276,56 @@ function mapNotifications(
     if (!coerceBool(n.isActive ?? true)) continue;
     const rawTo = (n.to ?? "").toString();
     if (!rawTo) continue;
+    const ruleName = (n.name ?? n.subject ?? "(unnamed notification)").toString().slice(0, 80);
     // GF supports `to` as either a literal email, comma-separated emails,
     // or a merge tag like `{Email:3}` referring to a field id. Translate
     // merge tags to {{field.<id>}} when the id matches a known field.
+    // Tag forms in the wild include `{Email:3}` and `{Community Name:1:value}`
+    // — the optional `:modifier` suffix needs to be tolerated, otherwise
+    // recipients get silently dropped.
+    const tagRe = /\{[^:}]+:(\d+)(?::[^}]*)?\}/;
     const recipients: string[] = [];
     for (const part of rawTo.split(",")) {
       const trimmed = part.trim();
       if (!trimmed) continue;
-      const tagMatch = trimmed.match(/\{[^:}]+:(\d+)\}/);
+      const tagMatch = trimmed.match(tagRe);
       if (tagMatch && fields.find((f) => f.id === tagMatch[1])) {
         recipients.push(`{{field.${tagMatch[1]}}}`);
-      } else if (trimmed.includes("@")) {
-        recipients.push(trimmed);
+        continue;
       }
+      if (tagMatch) {
+        // Tag pointed at a field id we couldn't find. Keep going but warn
+        // so the admin knows the importer dropped a recipient and which
+        // notification to fix in the editor.
+        warnings.push({
+          fieldLabel: ruleName,
+          fieldType: "notification.to",
+          reason: `Merge tag "${trimmed}" references field id ${tagMatch[1]} which is not in the imported field schema — recipient dropped`,
+        });
+        continue;
+      }
+      if (trimmed.includes("@")) {
+        recipients.push(trimmed);
+        continue;
+      }
+      // Common non-portable values:
+      //   {admin_email}        — GF macro for the WP admin email
+      //   2 / 8                — bare numeric user/role ids
+      //   {user:email} etc.    — runtime macros that don't have a field id
+      // We can't translate these, so warn instead of dropping silently.
+      // Submissions on the new form would otherwise succeed but no email
+      // would ever fire — see open question in MILESTONE plan.
+      warnings.push({
+        fieldLabel: ruleName,
+        fieldType: "notification.to",
+        reason: `Recipient "${trimmed}" has no portable form-engine equivalent — add a real email in the form editor before publishing`,
+      });
     }
-    if (recipients.length === 0) continue;
+    if (recipients.length === 0) {
+      // Whole rule contributed zero usable recipients; the warnings above
+      // already explain why. Skip emitting an empty rule.
+      continue;
+    }
     const subject = (n.subject ?? "").slice(0, 300) || "Form submission";
     rules.push({ recipients, subject });
   }
@@ -342,7 +378,7 @@ export function convertGfForm(form: GfFormPart): ImportResult {
     suggestedSlug,
     description: form.description?.slice(0, 2000) ?? null,
     field_schema: fields,
-    notification_config: mapNotifications(form.notifications, fields),
+    notification_config: mapNotifications(form.notifications, fields, warnings),
     confirmation_message: extractConfirmation(form),
     warnings,
   };
