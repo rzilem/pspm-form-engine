@@ -29,6 +29,19 @@ const gfChoiceSchema = z.object({
   value: z.string().optional(),
 }).passthrough();
 
+// GF v2 REST API (and some plugin variants) serializes "no choices" as
+// the empty string `""` and "no sub-inputs" as JSON null instead of
+// omitting the key. Both shapes are wire-compatible with "absent" — the
+// strict array-only schema rejected ~93% of the live psprop.net export.
+// Coerce non-array shapes to undefined so downstream code only ever sees
+// real arrays and the rest of the form parses normally.
+const arrayOrEmpty = <T extends z.ZodTypeAny>(item: T) =>
+  z
+    .preprocess(
+      (v) => (Array.isArray(v) ? v : undefined),
+      z.array(item).optional(),
+    );
+
 const gfFieldSchema = z
   .object({
     id: z.union([z.string(), z.number()]),
@@ -38,8 +51,8 @@ const gfFieldSchema = z
     isRequired: z.unknown().optional(),
     placeholder: z.string().optional(),
     description: z.string().optional(),
-    choices: z.array(gfChoiceSchema).optional(),
-    inputs: z.array(z.unknown()).optional(),
+    choices: arrayOrEmpty(gfChoiceSchema),
+    inputs: arrayOrEmpty(z.unknown()),
     pageNumber: z.union([z.string(), z.number()]).optional(),
     cssClass: z.string().optional(),
   })
