@@ -11,6 +11,7 @@ import {
   fieldDefinitionSchema,
   notificationConfigSchema,
   pdfConfigSchema,
+  workflowConfigSchema,
 } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
@@ -62,13 +63,21 @@ export async function loadFormDefinition(
   // pdf_config defaults inside the schema, so a missing/null column from
   // a pre-Phase-2 row is fine — it falls back to {enabled:false}.
   const pdfResult = pdfConfigSchema.safeParse(data.pdf_config ?? {});
+  // workflow_config likewise defaults; pre-Phase-4 rows have no column.
+  const wfResult = workflowConfigSchema.safeParse(data.workflow_config ?? {});
 
-  if (!fieldsResult.success || !notifResult.success || !pdfResult.success) {
+  if (
+    !fieldsResult.success ||
+    !notifResult.success ||
+    !pdfResult.success ||
+    !wfResult.success
+  ) {
     logger.error("Form definition failed schema validation", {
       slug: normalized,
       fieldErrors: fieldsResult.success ? null : fieldsResult.error.issues,
       notifErrors: notifResult.success ? null : notifResult.error.issues,
       pdfErrors: pdfResult.success ? null : pdfResult.error.issues,
+      wfErrors: wfResult.success ? null : wfResult.error.issues,
     });
     return null;
   }
@@ -78,6 +87,7 @@ export async function loadFormDefinition(
     field_schema: fieldsResult.data,
     notification_config: notifResult.data,
     pdf_config: pdfResult.data,
+    workflow_config: wfResult.data,
   });
   if (!parsed.success) {
     logger.error("Form definition envelope failed validation", {

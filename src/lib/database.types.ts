@@ -238,6 +238,7 @@ export interface Database {
           reviewed_at: string | null;
           reviewed_by: string | null;
           pdf_url: string | null;
+          workflow_state: unknown;
           created_at: string;
         };
         Insert: {
@@ -252,6 +253,7 @@ export interface Database {
           reviewed_at?: string | null;
           reviewed_by?: string | null;
           pdf_url?: string | null;
+          workflow_state?: unknown;
           created_at?: string;
         };
         Update: {
@@ -266,6 +268,52 @@ export interface Database {
           reviewed_at?: string | null;
           reviewed_by?: string | null;
           pdf_url?: string | null;
+          workflow_state?: unknown;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      workflow_actions: {
+        Row: {
+          id: string;
+          submission_id: string;
+          step_id: string;
+          assignee_email: string;
+          token_hash: string;
+          expires_at: string;
+          consumed_at: string | null;
+          consumed_action: string | null;
+          consumed_by_email: string | null;
+          consumed_by_ip: string | null;
+          revoked_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          submission_id: string;
+          step_id: string;
+          assignee_email: string;
+          token_hash: string;
+          expires_at: string;
+          consumed_at?: string | null;
+          consumed_action?: string | null;
+          consumed_by_email?: string | null;
+          consumed_by_ip?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          submission_id?: string;
+          step_id?: string;
+          assignee_email?: string;
+          token_hash?: string;
+          expires_at?: string;
+          consumed_at?: string | null;
+          consumed_action?: string | null;
+          consumed_by_email?: string | null;
+          consumed_by_ip?: string | null;
+          revoked_at?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -280,6 +328,7 @@ export interface Database {
           field_schema: unknown;
           notification_config: unknown;
           pdf_config: unknown;
+          workflow_config: unknown;
           confirmation_message: string;
           recaptcha_required: boolean;
           created_by: string | null;
@@ -296,6 +345,7 @@ export interface Database {
           field_schema?: unknown;
           notification_config?: unknown;
           pdf_config?: unknown;
+          workflow_config?: unknown;
           confirmation_message?: string;
           recaptcha_required?: boolean;
           created_by?: string | null;
@@ -312,6 +362,7 @@ export interface Database {
           field_schema?: unknown;
           notification_config?: unknown;
           pdf_config?: unknown;
+          workflow_config?: unknown;
           confirmation_message?: string;
           recaptcha_required?: boolean;
           created_by?: string | null;

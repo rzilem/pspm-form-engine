@@ -20,6 +20,7 @@ interface FormDefinitionRow {
   field_schema: unknown;
   notification_config: unknown;
   pdf_config: { enabled?: boolean; template?: string; filenamePrefix?: string } | null;
+  workflow_config: unknown;
   confirmation_message: string;
   recaptcha_required: boolean;
   published_at: string | null;
@@ -52,6 +53,8 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [notificationConfigJson, setNotificationConfigJson] = useState('{"rules":[]}');
   const [pdfEnabled, setPdfEnabled] = useState(false);
   const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
+  const [workflowEnabled, setWorkflowEnabled] = useState(false);
+  const [workflowStepsJson, setWorkflowStepsJson] = useState("[]");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -80,6 +83,12 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       );
       setPdfEnabled(Boolean(data.pdf_config?.enabled));
       setPdfFilenamePrefix(data.pdf_config?.filenamePrefix ?? "");
+      const wf = (data.workflow_config ?? {}) as {
+        enabled?: boolean;
+        steps?: unknown;
+      };
+      setWorkflowEnabled(Boolean(wf.enabled));
+      setWorkflowStepsJson(JSON.stringify(wf.steps ?? [], null, 2));
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Network error");
     }
@@ -110,6 +119,13 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
         setValidationError("Notification config is not valid JSON.");
         return;
       }
+      let workflowSteps: unknown;
+      try {
+        workflowSteps = JSON.parse(workflowStepsJson);
+      } catch {
+        setValidationError("Workflow steps are not valid JSON.");
+        return;
+      }
 
       const res = await fetch(`${API_BASE}/api/admin/forms/${id}`, {
         method: "PATCH",
@@ -131,6 +147,10 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
             ...(pdfFilenamePrefix.trim()
               ? { filenamePrefix: pdfFilenamePrefix.trim() }
               : {}),
+          },
+          workflow_config: {
+            enabled: workflowEnabled,
+            steps: workflowSteps,
           },
         }),
       });
@@ -241,7 +261,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
               </p>
               <p className="text-xs text-muted mt-1">
                 Attached to the admin notification email. Useful for letter
-                templates, payment plan requests, and anything you'd previously
+                templates, payment plan requests, and anything you&rsquo;d previously
                 send to Gravity PDF.
               </p>
             </div>
@@ -290,6 +310,50 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
             Each rule needs <code>recipients</code> (emails or <code>{`{{field.<id>}}`}</code> tokens) and
             a <code>subject</code>. Optional <code>conditional</code> gates the rule on a field value.
           </p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+            Workflow (Gravity Flow replacement)
+          </h2>
+          <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={workflowEnabled}
+              onChange={(e) => setWorkflowEnabled(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+            />
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Route every submission through approval steps
+              </p>
+              <p className="text-xs text-muted mt-1">
+                Each submission emits a magic-link email at each step. The
+                approver clicks <strong>Approve</strong>/<strong>Reject</strong>/<strong>Send back</strong>{" "}
+                &mdash; no login. Tokens expire in 30 days.
+              </p>
+            </div>
+          </label>
+          {workflowEnabled && (
+            <>
+              <textarea
+                className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                rows={12}
+                value={workflowStepsJson}
+                onChange={(e) => setWorkflowStepsJson(e.target.value)}
+                spellCheck={false}
+              />
+              <p className="text-xs text-muted">
+                Array of steps. Each step needs <code>id</code>,{" "}
+                <code>label</code>, and an <code>assignee</code> object:{" "}
+                <code>{`{type:"literal",email:"..."}`}</code>,{" "}
+                <code>{`{type:"field_email",fieldId:"..."}`}</code>, or{" "}
+                <code>{`{type:"admin_fallback"}`}</code>. Optional:{" "}
+                <code>actions</code>, <code>due_in_days</code>,{" "}
+                <code>email_subject</code>, <code>comment_loop_back</code>.
+              </p>
+            </>
+          )}
         </section>
 
         {validationError && (

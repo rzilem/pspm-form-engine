@@ -18,6 +18,7 @@ import {
   fieldDefinitionSchema,
   notificationConfigSchema,
   pdfConfigSchema,
+  workflowConfigSchema,
 } from "@/lib/form-definitions";
 import { z } from "zod";
 
@@ -28,6 +29,7 @@ const updateSchema = z.object({
   field_schema: z.array(fieldDefinitionSchema).optional(),
   notification_config: notificationConfigSchema.optional(),
   pdf_config: pdfConfigSchema.optional(),
+  workflow_config: workflowConfigSchema.optional(),
   confirmation_message: z.string().min(1).max(500).optional(),
   recaptcha_required: z.boolean().optional(),
 });

@@ -11,6 +11,10 @@ interface SubmissionRow {
   form_definition_id: string | null;
   data: Record<string, unknown>;
   status: "new" | "in_review" | "completed" | "spam" | "archived";
+  workflow_state: {
+    status?: "pending" | "in_progress" | "completed" | "rejected" | "expired";
+    current_step_id?: string | null;
+  } | null;
   reviewer_notes: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -24,6 +28,14 @@ const STATUS_PILL: Record<string, string> = {
   completed: "bg-brand-green-light text-brand-green-dark",
   spam: "bg-error-light text-error",
   archived: "bg-gray-100 text-gray-500",
+};
+
+const WORKFLOW_PILL: Record<string, string> = {
+  in_progress: "bg-yellow-100 text-yellow-800",
+  completed: "bg-brand-green-light text-brand-green-dark",
+  rejected: "bg-error-light text-error",
+  expired: "bg-gray-100 text-gray-500",
+  pending: "bg-primary-light text-primary",
 };
 
 function getPassword(): string {
@@ -265,6 +277,7 @@ export default function SubmissionsPage() {
                   <th className="text-left py-2 px-2 font-medium">When</th>
                   <th className="text-left py-2 px-2 font-medium">Form</th>
                   <th className="text-left py-2 px-2 font-medium">Status</th>
+                  <th className="text-left py-2 px-2 font-medium">Workflow</th>
                   <th className="text-left py-2 px-2 font-medium">Preview</th>
                   <th className="text-right py-2 px-2 font-medium">Actions</th>
                 </tr>
@@ -284,6 +297,22 @@ export default function SubmissionsPage() {
                       >
                         {s.status}
                       </span>
+                    </td>
+                    <td className="py-2 px-2">
+                      {s.workflow_state?.status ? (
+                        <span
+                          title={
+                            s.workflow_state.current_step_id
+                              ? `step: ${s.workflow_state.current_step_id}`
+                              : undefined
+                          }
+                          className={`inline-block text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 ${WORKFLOW_PILL[s.workflow_state.status] ?? ""}`}
+                        >
+                          {s.workflow_state.status.replace("_", " ")}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
                     </td>
                     <td className="py-2 px-2 text-xs text-muted truncate max-w-[300px]">
                       {previewLine(s.data ?? {})}
