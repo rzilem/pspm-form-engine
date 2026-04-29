@@ -287,15 +287,16 @@ function mapNotifications(
   const rules: NotificationConfig["rules"] = [];
   for (const n of list) {
     if (!coerceBool(n.isActive ?? true)) continue;
-    const rawTo = (n.to ?? "").toString();
-    if (!rawTo) continue;
     const ruleName = (n.name ?? n.subject ?? "(unnamed notification)").toString().slice(0, 80);
     const isToTypeField = (n.toType ?? "").toString().toLowerCase() === "field";
     // GF "Send To Field" mode: the export sets `toType: "field"` and
-    // stores the email field's numeric id in `to` (or `toField`). Map that
-    // to a `{{field.<id>}}` token when the id is in the imported schema.
-    // Without this branch user-confirmation rules from forms #7/#32/etc.
-    // would all silently drop because `to: "2"` is bare numeric.
+    // stores the email field's numeric id in `to` and/or `toField`.
+    // Modern GF exports have populated both, but older ones (and some
+    // edge cases in our live psprop.net export) only carry `toField`.
+    // Read both before the rawTo guard so a toField-only export still
+    // gets translated. Without this branch user-confirmation rules from
+    // forms #7/#32/etc. would all silently drop because `to: "2"` is
+    // bare numeric.
     if (isToTypeField) {
       const fieldId = String(n.toField ?? n.to ?? "").trim();
       if (fieldId && fields.find((f) => f.id === fieldId)) {
@@ -314,6 +315,8 @@ function mapNotifications(
       });
       continue;
     }
+    const rawTo = (n.to ?? "").toString();
+    if (!rawTo) continue;
     // GF also supports `to` as either a literal email, comma-separated
     // emails, or a merge tag like `{Email:3}` referring to a field id.
     // Translate merge tags to {{field.<id>}} when the id matches a known
