@@ -27,9 +27,22 @@ export const FIELD_TYPES = [
   "name",
   "address",
   "consent",
+  "file_upload",
+  "signature",
   "section_break",
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
+
+// Shape stored in submission data for file_upload fields. The /api/upload
+// endpoint returns one of these per uploaded file; the form serializes an
+// array on submit and the resolver re-checks each path.
+export const uploadedFileSchema = z.object({
+  path: z.string().regex(/^upload-sessions\/[a-zA-Z0-9-]+\/.+/, "invalid upload path"),
+  filename: z.string().min(1).max(255),
+  size: z.number().int().nonnegative().max(26214400),
+  mimeType: z.string().min(1).max(120),
+});
+export type UploadedFile = z.infer<typeof uploadedFileSchema>;
 
 // ── Field definition (one object per question on the form) ─────────────
 const fieldOptionSchema = z.object({
@@ -152,6 +165,24 @@ export function buildSubmissionSchema(
       case "checkbox_group":
         leaf = z.array(z.string());
         break;
+      case "file_upload":
+        // Each entry is the descriptor /api/upload returned. Required
+        // gating is applied below — empty array still passes the array
+        // shape, then min(1) is enforced via the required block.
+        leaf = z.array(uploadedFileSchema);
+        break;
+      case "signature":
+        // PNG data URL produced by signature_pad's toDataURL("image/png").
+        // Cap at ~2 MB so a malicious page can't ship a megabyte JSON
+        // body; real signatures are <50 KB.
+        leaf = z
+          .string()
+          .max(2_800_000, "Signature too large")
+          .refine(
+            (v) => v === "" || /^data:image\/(png|jpe?g);base64,/.test(v),
+            { message: "Invalid signature" },
+          );
+        break;
       case "consent":
         // Consent must be checked (true) when required; ignored otherwise.
         leaf = f.required
@@ -213,9 +244,19 @@ export function buildSubmissionSchema(
     }
 
     // Required gating. For string-ish leaves we treat empty string as missing
-    // so that `required: false` doesn't reject blank fields.
+    // so that `required: false` doesn't reject blank fields. file_upload
+    // (array) and signature (string) need their own required predicates.
     if (f.required && f.type !== "consent" && f.type !== "name") {
-      if (leaf instanceof z.ZodString) {
+      if (f.type === "file_upload") {
+        leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
+          1,
+          `${f.label} is required`,
+        );
+      } else if (f.type === "signature") {
+        leaf = (leaf as z.ZodString).refine((v: string) => v.length > 0, {
+          message: `${f.label} is required`,
+        });
+      } else if (leaf instanceof z.ZodString) {
         leaf = leaf.min(1, `${f.label} is required`);
       }
     } else if (!f.required && f.type !== "consent") {

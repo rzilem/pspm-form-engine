@@ -7,10 +7,16 @@ import { RadioGroup } from "@/components/ui/RadioGroup";
 import { CheckboxGroup } from "@/components/ui/CheckboxGroup";
 import { SelectField } from "@/components/ui/SelectField";
 import { ConsentCheckbox } from "@/components/forms/ConsentCheckbox";
-import type { FieldDefinition } from "@/lib/form-definitions";
+import { DynamicFileUpload } from "@/components/forms/DynamicFileUpload";
+import { SignaturePad } from "@/components/forms/SignaturePad";
+import type { FieldDefinition, UploadedFile } from "@/lib/form-definitions";
 
 interface DynamicFieldProps {
   field: FieldDefinition;
+  // Required by file_upload to bind /api/upload to a published form. Other
+  // field types ignore it; making it a separate prop (not threading through
+  // a context) keeps DynamicField a pure component for unit tests.
+  formSlug: string;
 }
 
 /**
@@ -22,7 +28,7 @@ interface DynamicFieldProps {
  * side validation (in form-definitions.ts buildSubmissionSchema) is the
  * source of truth — this UI gate is purely cosmetic.
  */
-export function DynamicField({ field }: DynamicFieldProps) {
+export function DynamicField({ field, formSlug }: DynamicFieldProps) {
   const { register, formState, control, watch } = useFormContext();
 
   // Conditional visibility. Watching directly so the UI re-evaluates on
@@ -170,6 +176,51 @@ export function DynamicField({ field }: DynamicFieldProps) {
           </p>
         )}
       </fieldset>
+    );
+  }
+
+  if (field.type === "file_upload") {
+    return (
+      <Controller
+        name={field.id}
+        control={control}
+        defaultValue={[]}
+        render={({ field: controllerField }) => (
+          <DynamicFileUpload
+            name={field.id}
+            label={field.label}
+            formSlug={formSlug}
+            required={field.required}
+            multiple
+            helpText={field.helpText}
+            error={error}
+            value={
+              Array.isArray(controllerField.value)
+                ? (controllerField.value as UploadedFile[])
+                : []
+            }
+            onChange={(files) => controllerField.onChange(files)}
+          />
+        )}
+      />
+    );
+  }
+
+  if (field.type === "signature") {
+    return (
+      <Controller
+        name={field.id}
+        control={control}
+        defaultValue=""
+        render={({ field: controllerField }) => (
+          <SignaturePad
+            label={field.label}
+            required={field.required}
+            error={error}
+            onChange={(dataUrl) => controllerField.onChange(dataUrl)}
+          />
+        )}
+      />
     );
   }
 

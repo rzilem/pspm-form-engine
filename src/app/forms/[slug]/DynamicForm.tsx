@@ -33,7 +33,8 @@ export function DynamicForm({ definition }: DynamicFormProps) {
     for (const f of definition.field_schema) {
       if (f.type === "section_break") continue;
       if (f.type === "consent") out[f.id] = false;
-      else if (f.type === "checkbox_group") out[f.id] = [];
+      else if (f.type === "checkbox_group" || f.type === "file_upload")
+        out[f.id] = [];
       else if (f.type === "name") out[f.id] = { first: "", last: "" };
       else if (f.type === "address")
         out[f.id] = { street: "", city: "", state: "", zip: "" };
@@ -52,7 +53,11 @@ export function DynamicForm({ definition }: DynamicFormProps) {
       {() => (
         <div className="space-y-5">
           {definition.field_schema.map((field) => (
-            <DynamicField key={field.id} field={field} />
+            <DynamicField
+              key={field.id}
+              field={field}
+              formSlug={definition.slug}
+            />
           ))}
         </div>
       )}

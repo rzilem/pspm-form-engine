@@ -22,11 +22,16 @@ import {
   Page,
   Text,
   View,
+  Image,
   StyleSheet,
   pdf,
   Font,
 } from "@react-pdf/renderer";
-import type { FieldDefinition, FormDefinition } from "@/lib/form-definitions";
+import type {
+  FieldDefinition,
+  FormDefinition,
+  UploadedFile,
+} from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 
 // PSPM brand palette (mirrors src/index.css custom properties).
@@ -132,6 +137,19 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border,
     paddingTop: 8,
   },
+  fileList: {
+    flexDirection: "column",
+    gap: 2,
+  },
+  fileItem: {
+    fontSize: 9,
+    color: COLORS.foreground,
+  },
+  signatureImage: {
+    width: 200,
+    height: 80,
+    objectFit: "contain",
+  },
 });
 
 // Format a single value for the PDF cell. Mirrors lib/email.ts logic so
@@ -150,6 +168,49 @@ function formatValue(value: unknown): string {
       .join(" ");
   }
   return "";
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Decide whether a row should render at all and what its value cell is.
+// Returns null when the field is empty (caller skips it). For file_upload
+// + signature returns a JSX cell; for everything else returns a string
+// the caller wraps in <Text>.
+function renderValueCell(
+  field: FieldDefinition,
+  value: unknown,
+): React.ReactNode | null {
+  if (field.type === "file_upload") {
+    const files = Array.isArray(value) ? (value as UploadedFile[]) : [];
+    if (files.length === 0) return null;
+    return (
+      <View style={styles.fileList}>
+        {files.map((f, i) => (
+          <Text key={i} style={styles.fileItem}>
+            • {f.filename} ({formatFileSize(f.size)})
+          </Text>
+        ))}
+      </View>
+    );
+  }
+  if (field.type === "signature") {
+    if (typeof value !== "string" || !value.startsWith("data:image/")) {
+      return null;
+    }
+    // Suppress react-pdf's known limitation: large data URLs slow render.
+    // We already cap at 2MB server-side via the Zod schema.
+    // Image is @react-pdf/renderer's PDF primitive, not <img>; alt-text rule
+    // doesn't apply here.
+    // eslint-disable-next-line jsx-a11y/alt-text
+    return <Image src={value} style={styles.signatureImage} />;
+  }
+  const text = formatValue(value);
+  if (text === "" || text === "—") return null;
+  return <Text>{text}</Text>;
 }
 
 /**
@@ -213,15 +274,15 @@ function DefaultFormDocument({
             {g.heading ? <Text style={styles.sectionHeading}>{g.heading}</Text> : null}
             <View style={styles.table}>
               {g.fields.map((f, fi) => {
-                const v = formatValue(data[f.id]);
-                if (v === "" || v === "—") return null;
+                const cell = renderValueCell(f, data[f.id]);
+                if (cell === null) return null;
                 return (
                   <View
                     key={f.id}
                     style={[styles.row, fi % 2 === 1 ? styles.rowZebra : {}]}
                   >
                     <Text style={styles.labelCell}>{f.label}</Text>
-                    <Text style={styles.valueCell}>{v}</Text>
+                    <View style={styles.valueCell}>{cell}</View>
                   </View>
                 );
               })}
