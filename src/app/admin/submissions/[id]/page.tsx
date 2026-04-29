@@ -47,6 +47,80 @@ function formatValue(v: unknown): string {
   return String(v);
 }
 
+interface UploadedFileRow {
+  path: string;
+  filename: string;
+  size: number;
+  mimeType: string;
+}
+
+function isUploadedFileArray(v: unknown): v is UploadedFileRow[] {
+  return (
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.every(
+      (x) =>
+        x &&
+        typeof x === "object" &&
+        typeof (x as { path?: unknown }).path === "string" &&
+        typeof (x as { filename?: unknown }).filename === "string",
+    )
+  );
+}
+
+function isSignatureDataUrl(v: unknown): v is string {
+  return typeof v === "string" && v.startsWith("data:image/");
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FileLinks({
+  files,
+  password,
+  apiBase,
+}: {
+  files: UploadedFileRow[];
+  password: string;
+  apiBase: string;
+}) {
+  async function open(path: string) {
+    const res = await fetch(
+      `${apiBase}/api/admin/uploads/sign?path=${encodeURIComponent(path)}`,
+      { headers: { "x-admin-password": password } },
+    );
+    if (!res.ok) {
+      alert("Could not generate download link");
+      return;
+    }
+    const body = (await res.json()) as { url?: string };
+    if (body.url) window.open(body.url, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <ul className="space-y-1">
+      {files.map((f) => (
+        <li key={f.path} className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => open(f.path)}
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            {f.filename}
+          </button>
+          <span className="text-xs text-muted">
+            ({formatBytes(f.size)} · {f.mimeType})
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function SubmissionDetailPage({
   params,
 }: {
@@ -170,7 +244,22 @@ export default function SubmissionDetailPage({
                       {k}
                     </td>
                     <td className="py-2 text-foreground align-top whitespace-pre-wrap break-words">
-                      {formatValue(v)}
+                      {isUploadedFileArray(v) ? (
+                        <FileLinks
+                          files={v}
+                          password={getPassword()}
+                          apiBase={API_BASE}
+                        />
+                      ) : isSignatureDataUrl(v) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={v}
+                          alt="Signature"
+                          className="max-h-24 border border-border rounded bg-white"
+                        />
+                      ) : (
+                        formatValue(v)
+                      )}
                     </td>
                   </tr>
                 ))}

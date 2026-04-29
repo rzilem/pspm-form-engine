@@ -159,18 +159,52 @@ function renderDynamicEmailBody(
     .filter((f: FieldDefinition) => f.type !== "section_break")
     .map((f) => {
       const raw = data[f.id];
-      const value = formatFieldValue(raw);
-      if (!value) return "";
+      const cellHtml = renderFieldCellHtml(f, raw);
+      if (!cellHtml) return "";
       return `<tr>
         <td style="padding:6px 12px;font-weight:600;vertical-align:top;border-bottom:1px solid #f0f0f0">${escapeHtml(f.label)}</td>
-        <td style="padding:6px 12px;vertical-align:top;border-bottom:1px solid #f0f0f0">${escapeHtml(value)}</td>
+        <td style="padding:6px 12px;vertical-align:top;border-bottom:1px solid #f0f0f0">${cellHtml}</td>
       </tr>`;
     })
     .join("");
   return `
     <p>A new submission was received for <strong>${escapeHtml(def.title)}</strong>.</p>
     <table style="border-collapse:collapse;margin:16px 0;min-width:300px">${rows}</table>
+    <p style="color:#666;font-size:12px">File uploads are stored privately; sign in to the admin to download. Signatures are captured as images on the attached PDF.</p>
   `;
+}
+
+// Render the value cell as HTML (already escaped). Returns empty string
+// when the field is missing/blank so the caller can skip the row entirely.
+function renderFieldCellHtml(field: FieldDefinition, raw: unknown): string {
+  if (field.type === "file_upload") {
+    if (!Array.isArray(raw) || raw.length === 0) return "";
+    const items = raw
+      .filter(
+        (u): u is { filename: string; size: number } =>
+          Boolean(u) &&
+          typeof u === "object" &&
+          typeof (u as { filename?: unknown }).filename === "string",
+      )
+      .map((u) => `<li>${escapeHtml(u.filename)} (${formatBytes(u.size)})</li>`)
+      .join("");
+    if (!items) return "";
+    return `<ul style="margin:0;padding-left:18px">${items}</ul>`;
+  }
+  if (field.type === "signature") {
+    if (typeof raw !== "string" || !raw.startsWith("data:image/")) return "";
+    return `<em style="color:#666">Signature captured (see attached PDF)</em>`;
+  }
+  const value = formatFieldValue(raw);
+  if (!value) return "";
+  return escapeHtml(value);
+}
+
+function formatBytes(bytes: number): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatFieldValue(value: unknown): string {
