@@ -86,6 +86,20 @@ export const notificationConfigSchema = z.object({
 });
 export type NotificationConfig = z.infer<typeof notificationConfigSchema>;
 
+// ── PDF config (Phase 2: per-submission PDF generation) ────────────────
+// When enabled, /api/submit renders a PDF after save and attaches it to
+// the admin notification email. Templates: 'default' = branded letterhead
+// with field/value table. Future templates can ship as additional values.
+export const pdfConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  template: z.enum(["default"]).default("default"),
+  // Filename prefix for the PDF; submission id is appended. Defaults to
+  // the form slug. e.g. prefix='HOA-Payment-Plan' yields filenames like
+  // 'HOA-Payment-Plan-<id>.pdf'.
+  filenamePrefix: z.string().max(80).optional(),
+});
+export type PdfConfig = z.infer<typeof pdfConfigSchema>;
+
 // ── Form definition (one row in form_definitions) ───────────────────────
 export const formDefinitionSchema = z.object({
   id: z.string().uuid(),
@@ -95,6 +109,7 @@ export const formDefinitionSchema = z.object({
   status: z.enum(["draft", "published", "archived"]),
   field_schema: z.array(fieldDefinitionSchema),
   notification_config: notificationConfigSchema,
+  pdf_config: pdfConfigSchema.default({ enabled: false, template: "default" }),
   confirmation_message: z.string().min(1).max(500),
   recaptcha_required: z.boolean(),
   created_by: z.string().nullable(),

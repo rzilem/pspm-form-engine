@@ -237,6 +237,7 @@ export interface Database {
           reviewer_notes: string | null;
           reviewed_at: string | null;
           reviewed_by: string | null;
+          pdf_url: string | null;
           created_at: string;
         };
         Insert: {
@@ -250,6 +251,7 @@ export interface Database {
           reviewer_notes?: string | null;
           reviewed_at?: string | null;
           reviewed_by?: string | null;
+          pdf_url?: string | null;
           created_at?: string;
         };
         Update: {
@@ -263,6 +265,7 @@ export interface Database {
           reviewer_notes?: string | null;
           reviewed_at?: string | null;
           reviewed_by?: string | null;
+          pdf_url?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -276,6 +279,7 @@ export interface Database {
           status: string;
           field_schema: unknown;
           notification_config: unknown;
+          pdf_config: unknown;
           confirmation_message: string;
           recaptcha_required: boolean;
           created_by: string | null;
@@ -291,6 +295,7 @@ export interface Database {
           status?: string;
           field_schema?: unknown;
           notification_config?: unknown;
+          pdf_config?: unknown;
           confirmation_message?: string;
           recaptcha_required?: boolean;
           created_by?: string | null;
@@ -306,6 +311,7 @@ export interface Database {
           status?: string;
           field_schema?: unknown;
           notification_config?: unknown;
+          pdf_config?: unknown;
           confirmation_message?: string;
           recaptcha_required?: boolean;
           created_by?: string | null;

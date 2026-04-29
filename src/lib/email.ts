@@ -40,6 +40,7 @@ export async function sendFormNotification(
   formSlug: string,
   data: Record<string, unknown>,
   definition?: FormDefinition,
+  pdfAttachment?: { filename: string; content: Buffer } | null,
 ): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -82,6 +83,12 @@ export async function sendFormNotification(
   const body = renderDynamicEmailBody(def, data);
   let sent = 0;
 
+  // Build the attachment list once — same PDF goes on every rule that
+  // fires for this submission. Resend accepts {filename, content: Buffer}.
+  const attachments = pdfAttachment
+    ? [{ filename: pdfAttachment.filename, content: pdfAttachment.content }]
+    : undefined;
+
   for (const rule of rules) {
     // Conditional gate (e.g. only notify when contactReason == "billing")
     if (rule.conditional) {
@@ -107,6 +114,7 @@ export async function sendFormNotification(
       to: recipients,
       subject,
       html: wrapHtml(subject, body),
+      ...(attachments ? { attachments } : {}),
     });
     sent++;
   }
@@ -115,6 +123,7 @@ export async function sendFormNotification(
     formSlug,
     rulesEvaluated: rules.length,
     rulesSent: sent,
+    attachedPdf: Boolean(pdfAttachment),
   });
 }
 
