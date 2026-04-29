@@ -128,7 +128,7 @@ Apply via `supabase db push --linked` against the linked project, OR via `mcp__c
 | 5 | `pool-signature-form` | Pool Signature Form | 3 | 0 | username + password fields skipped. `{admin_email}` recipient dropped — add real email. Has `signature` field; wire to PDF if needed. |
 | 7 | `condominium-request-form-type-1` | Condominium Request Form - Type 1 | 4 | 0 | Send-To-Field notification points at deleted GF field id 2; admin must add a real recipient. Has `fileupload` field. |
 | 8 | `test-of-payment-plan-form` | Test of Payment Plan form | 2 | 0 | Looks like an abandoned test draft on GF side. Decide: rebuild, or delete. |
-| 14 | `bid-request-system` | Bid Request System | 38 | 2 | **MAJOR**: 51 `image_choice` fields skipped (Gravity Wiz feature, no equivalent in form-engine). Plus 4 page breaks + merge_pdfs/pdfpreview. Form has 2 working notification rules (`{Community Name:1:value}` modifier-tag + literal email). Likely needs manual rebuild or stays on GF. |
+| ~~14~~ | ~~`bid-request-system`~~ | ~~Bid Request System~~ | ~~38~~ | ~~2~~ | **DRAFT DELETED 2026-04-29.** GF form #14 was already replaced by the standalone **HOA Bid Wizard** project (`bid-wizard` repo, in production with Wendy-approved feedback). Don't migrate to form-engine; treat as a legacy slug at the GF retirement step. Page `psprop.net/bid-request/` (WP id=2) may still have `[gravityform id=14]` shortcode — verify it points at the wizard before retiring GF in step 12. |
 | 15 | `letter-template` | Letter Template | 5 | 1 | 5 warnings: multi_choice + time + list + html + pdfpreview skipped. Needs `pdf_config.enabled=true` per Phase 6. |
 | 24 | `eastwood-at-riverside-community-dog-park-survey` | Eastwood at Riverside Community Dog Park Survey | 3 | 0 | 1 html skipped. Survey-only; no notification originally. Add a recipient if the answers should be emailed. |
 | 27 | `manager-letter-template-tool` | Manager Letter Template Tool | 1 | 0 | 3 html separators skipped. `{admin_email}` recipient dropped. Needs `pdf_config.enabled=true`. |
@@ -147,6 +147,9 @@ Apply via `supabase db push --linked` against the linked project, OR via `mcp__c
 - #33 Falcon Pointe Portal Request Form → `/falcon-pointe-portal`
 - #36 Pool Pavilion Reservation → `/pavilion-reservation`
 - #38 Indoor Gathering Room Reservation → `/indoor-reservation`
+
+**Replaced by separate project** (don't import into form-engine):
+- #14 Bid Request System → standalone **HOA Bid Wizard** (`bid-wizard` repo, in production). Draft was created and deleted same day after Ricky flagged it.
 
 **Tests / abandoned drafts:**
 - #12 Email Test, #18 Board Candidate Questionnaire (0 fields), #21 Test 123, #26 Notification Shortcode Form, #42 Test (0 fields)
