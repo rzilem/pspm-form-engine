@@ -113,6 +113,82 @@ export const pdfConfigSchema = z.object({
 });
 export type PdfConfig = z.infer<typeof pdfConfigSchema>;
 
+// ── Workflow config (Phase 4: multi-step approval engine) ──────────────
+// Replaces Gravity Flow's sequential pipelines. v1 is sequential-only —
+// parallel + conditional branches are scheduled for 4.1.
+//
+// Each step has:
+//   - `id`: stable identifier referenced by history rows. Don't reuse.
+//   - `assignee`: how to resolve the email at runtime.
+//       - "literal": fixed `email`
+//       - "field_email": pull from submission data via `fieldId` (must be
+//         a string that contains "@"; resolveStepAssignee falls through
+//         to admin_fallback if the field is missing/invalid)
+//       - "admin_fallback": always go to ADMIN_NOTIFY_EMAIL env
+//   - `actions`: which decisions this step accepts. Most workflows are
+//     ["approve", "reject"]; "comment" lets the assignee request changes
+//     without advancing the workflow (loops back to the previous step or
+//     stays on the current step depending on the comment_loop_back flag).
+//   - `due_in_days`: optional SLA — used by a future cron to nag.
+//   - `email_subject`: per-step subject template; supports {{field.<id>}}
+//     tokens and the {{step.label}} / {{form.title}} placeholders.
+const stepAssigneeSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("literal"),
+    email: z.string().email().max(320),
+  }),
+  z.object({
+    type: z.literal("field_email"),
+    fieldId: z.string().min(1).max(64),
+  }),
+  z.object({
+    type: z.literal("admin_fallback"),
+  }),
+]);
+
+export const workflowStepSchema = z.object({
+  id: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/, "lowercase letters, numbers, hyphens only"),
+  label: z.string().min(1).max(200),
+  assignee: stepAssigneeSchema,
+  actions: z
+    .array(z.enum(["approve", "reject", "comment"]))
+    .min(1)
+    .default(["approve", "reject"]),
+  due_in_days: z.number().int().positive().max(365).optional(),
+  email_subject: z.string().max(300).optional(),
+  // When true, "comment" decisions loop back to the previous step
+  // (or stay on current if this is the first step). Default false =
+  // comment is recorded but workflow stays put.
+  comment_loop_back: z.boolean().default(false),
+});
+export type WorkflowStep = z.infer<typeof workflowStepSchema>;
+
+export const workflowConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  steps: z.array(workflowStepSchema).default([]),
+});
+export type WorkflowConfig = z.infer<typeof workflowConfigSchema>;
+
+// Submission-side state. Persisted on form_submissions.workflow_state.
+export const workflowHistoryEntrySchema = z.object({
+  step_id: z.string(),
+  action: z.enum(["approve", "reject", "comment", "kickoff"]),
+  actor_email: z.string(),
+  actor_label: z.string().optional(),
+  comments: z.string().max(4000).optional(),
+  decided_at: z.string(),
+});
+export type WorkflowHistoryEntry = z.infer<typeof workflowHistoryEntrySchema>;
+
+export const workflowStateSchema = z.object({
+  status: z.enum(["pending", "in_progress", "completed", "rejected", "expired"]),
+  current_step_id: z.string().nullable(),
+  history: z.array(workflowHistoryEntrySchema).default([]),
+  started_at: z.string(),
+  completed_at: z.string().optional(),
+});
+export type WorkflowState = z.infer<typeof workflowStateSchema>;
+
 // ── Form definition (one row in form_definitions) ───────────────────────
 export const formDefinitionSchema = z.object({
   id: z.string().uuid(),
@@ -123,6 +199,7 @@ export const formDefinitionSchema = z.object({
   field_schema: z.array(fieldDefinitionSchema),
   notification_config: notificationConfigSchema,
   pdf_config: pdfConfigSchema.default({ enabled: false, template: "default" }),
+  workflow_config: workflowConfigSchema.default({ enabled: false, steps: [] }),
   confirmation_message: z.string().min(1).max(500),
   recaptcha_required: z.boolean(),
   created_by: z.string().nullable(),

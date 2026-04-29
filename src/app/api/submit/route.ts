@@ -9,11 +9,12 @@ import {
 import { insuranceFormSchema } from "@/lib/schemas-insurance";
 import { logger } from "@/lib/logger";
 import { getSupabase } from "@/lib/supabase";
-import { sendFormNotification } from "@/lib/email";
+import { sendFormNotification, sendWorkflowAssignmentEmail } from "@/lib/email";
 import { verifyRecaptcha } from "@/lib/recaptcha";
 import { loadFormDefinition } from "@/lib/form-loader";
 import { buildSubmissionSchema, type FormDefinition } from "@/lib/form-definitions";
 import { generateFormPdf, getPdfFilename } from "@/lib/form-pdf";
+import { kickoffWorkflow, workflowActionUrl } from "@/lib/workflow";
 import type { z } from "zod";
 
 
@@ -173,6 +174,40 @@ export async function POST(request: Request) {
       );
     } catch (err) {
       logger.error("Email notification failed", { error: String(err), formSlug });
+    }
+
+    // Workflow kickoff — only for dynamic forms with workflow_config.enabled.
+    // Legacy hand-coded forms don't have workflow yet (Phase 4.2 may add a
+    // way to wire workflows to legacy slugs). Synchronous like email so the
+    // first-step token + assignment notification ship before we ack.
+    if (formDefinition) {
+      try {
+        const result = await kickoffWorkflow(
+          submission.id,
+          formDefinition,
+          formResult.data as Record<string, unknown>,
+        );
+        if (result.firstToken) {
+          await sendWorkflowAssignmentEmail({
+            to: result.firstToken.assigneeEmail,
+            formTitle: formDefinition.title,
+            stepLabel: result.firstToken.step.label,
+            customSubject: result.firstToken.step.email_subject,
+            actionUrl: workflowActionUrl(result.firstToken.token),
+            submissionRef: submission.id,
+            description: formDefinition.description ?? undefined,
+          });
+        }
+      } catch (err) {
+        // Don't fail the submission if the workflow kickoff has a
+        // resolver bug — the submission row still lives, and an admin
+        // can re-issue tokens via the admin UI in Phase 4.2.
+        logger.error("Workflow kickoff failed", {
+          error: String(err),
+          formSlug,
+          submissionId: submission.id,
+        });
+      }
     }
 
     if (formSlug === "proposal") {

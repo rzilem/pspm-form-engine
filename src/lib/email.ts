@@ -221,6 +221,107 @@ function formatFieldValue(value: unknown): string {
   return "";
 }
 
+/**
+ * Send a workflow step-assignment email with magic-link approve/reject URL.
+ * Called by /api/submit on kickoff and by applyDecision on advance.
+ *
+ * The assignee email already came from resolveStepAssignee + admin
+ * fallback, so we don't try to "fix" missing emails here — drop the
+ * notification and log if recipient is empty.
+ */
+export async function sendWorkflowAssignmentEmail(params: {
+  to: string;
+  formTitle: string;
+  stepLabel: string;
+  actionUrl: string;
+  customSubject?: string;
+  submissionRef: string;
+  description?: string;
+  comments?: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    logger.info("Workflow assignment email skipped — no RESEND_API_KEY", {
+      to: params.to,
+      step: params.stepLabel,
+    });
+    return;
+  }
+  if (!params.to || !params.to.includes("@")) {
+    logger.warn("Workflow assignment email has invalid recipient — skipping", {
+      to: params.to,
+    });
+    return;
+  }
+
+  const subject =
+    params.customSubject?.trim() ||
+    `Action required: ${params.stepLabel} — ${params.formTitle}`;
+  const body = `
+    <p>You have a new <strong>${escapeHtml(params.stepLabel)}</strong> task waiting on a <strong>${escapeHtml(params.formTitle)}</strong> submission.</p>
+    ${params.description ? `<p>${escapeHtml(params.description)}</p>` : ""}
+    ${params.comments ? `<p><em>Previous note:</em> ${escapeHtml(params.comments)}</p>` : ""}
+    <p style="margin-top:24px">
+      <a href="${escapeHtml(params.actionUrl)}"
+         style="display:inline-block;background:#3A4DA8;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold">
+        Review &amp; Decide
+      </a>
+    </p>
+    <p style="color:#666;font-size:12px;margin-top:24px">
+      Reference: ${escapeHtml(params.submissionRef.slice(0, 8))}<br>
+      This link expires in 30 days. Single-use; once you decide, the link
+      stops working. If you didn't expect this email, just ignore it.
+    </p>
+  `;
+
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [params.to],
+    subject,
+    html: wrapHtml(subject, body),
+  });
+  logger.info("Workflow assignment email sent", {
+    to: params.to,
+    step: params.stepLabel,
+  });
+}
+
+/**
+ * Notify the original submitter that their submission was rejected
+ * mid-workflow. Optional — caller passes a recipient resolved from
+ * a designated email field (e.g. `email`) on the form data.
+ */
+export async function sendWorkflowOutcomeEmail(params: {
+  to: string;
+  formTitle: string;
+  outcome: "approved" | "rejected";
+  comments?: string;
+  submissionRef: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+  if (!params.to || !params.to.includes("@")) return;
+
+  const subject = `Update on your ${params.formTitle} submission`;
+  const verdict =
+    params.outcome === "approved"
+      ? "Your request has been approved."
+      : "Your request was not approved at this time.";
+  const body = `
+    <p>${escapeHtml(verdict)}</p>
+    ${params.comments ? `<p><em>Note from reviewer:</em> ${escapeHtml(params.comments)}</p>` : ""}
+    <p style="color:#666;font-size:12px;margin-top:24px">
+      Reference: ${escapeHtml(params.submissionRef.slice(0, 8))}
+    </p>
+  `;
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [params.to],
+    subject,
+    html: wrapHtml(subject, body),
+  });
+}
+
 /** Send booking confirmation email */
 export async function sendBookingConfirmation(params: {
   email: string;
