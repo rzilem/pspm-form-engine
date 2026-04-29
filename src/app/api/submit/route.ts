@@ -11,6 +11,8 @@ import { logger } from "@/lib/logger";
 import { getSupabase } from "@/lib/supabase";
 import { sendFormNotification } from "@/lib/email";
 import { verifyRecaptcha } from "@/lib/recaptcha";
+import { loadFormDefinition } from "@/lib/form-loader";
+import { buildSubmissionSchema } from "@/lib/form-definitions";
 import type { z } from "zod";
 
 
@@ -40,8 +42,10 @@ async function pushLeadToCrm(submissionId: string, data: Record<string, unknown>
   }
 }
 
-// Map form slugs to their validation schemas
-const formSchemas: Record<string, z.ZodType<unknown>> = {
+// Legacy hand-coded schemas. Slugs registered here render via per-form
+// Next.js pages (/proposal, /invoice, etc.). Anything not in this map
+// falls through to form_definitions for the dynamic builder path.
+const legacyFormSchemas: Record<string, z.ZodType<unknown>> = {
   proposal: proposalFormSchema,
   invoice: invoiceFormSchema,
   billback: billbackFormSchema,
@@ -69,18 +73,33 @@ export async function POST(request: Request) {
 
     const { formSlug, data, recaptchaToken } = envelope.data;
 
-    // Verify reCAPTCHA
-    const captchaValid = await verifyRecaptcha(recaptchaToken);
-    if (!captchaValid) {
-      logger.warn("reCAPTCHA failed", { formSlug });
-      return Response.json({ error: "Bot detection failed. Please try again." }, { status: 403 });
+    // Resolve the form: legacy hand-coded first, then form_definitions.
+    // We need the definition row for two things downstream: (1) reCAPTCHA
+    // bypass for forms that explicitly disable it, (2) attaching
+    // form_definition_id to the submission for the admin inbox.
+    let formSchema: z.ZodType<unknown> | null = legacyFormSchemas[formSlug] ?? null;
+    let formDefinitionId: string | null = null;
+    let recaptchaRequired = true;
+
+    if (!formSchema) {
+      const definition = await loadFormDefinition(formSlug);
+      if (!definition) {
+        logger.warn("Unknown form slug", { formSlug });
+        return Response.json({ error: "Unknown form type" }, { status: 400 });
+      }
+      formSchema = buildSubmissionSchema(definition.field_schema);
+      formDefinitionId = definition.id;
+      recaptchaRequired = definition.recaptcha_required;
     }
 
-    // Validate form-specific data
-    const formSchema = formSchemas[formSlug];
-    if (!formSchema) {
-      logger.warn("Unknown form slug", { formSlug });
-      return Response.json({ error: "Unknown form type" }, { status: 400 });
+    // Verify reCAPTCHA — legacy forms always require it; dynamic forms
+    // opt out via form_definitions.recaptcha_required = false.
+    if (recaptchaRequired) {
+      const captchaValid = await verifyRecaptcha(recaptchaToken);
+      if (!captchaValid) {
+        logger.warn("reCAPTCHA failed", { formSlug });
+        return Response.json({ error: "Bot detection failed. Please try again." }, { status: 403 });
+      }
     }
 
     const formResult = formSchema.safeParse(data);
@@ -108,6 +127,7 @@ export async function POST(request: Request) {
       .from("form_submissions")
       .insert({
         form_slug: formSlug,
+        form_definition_id: formDefinitionId,
         data: formResult.data as Record<string, unknown>,
         ip_address: ip,
         user_agent: userAgent,
@@ -141,6 +161,7 @@ export async function POST(request: Request) {
     logger.info("Form submission saved", {
       formSlug,
       submissionId: submission.id,
+      formDefinitionId,
     });
 
     return Response.json({
