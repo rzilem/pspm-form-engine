@@ -10,6 +10,15 @@ import { SelectField } from "@/components/ui/SelectField";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
+interface WorkflowHistoryRow {
+  step_id: string;
+  action: "approve" | "reject" | "comment" | "kickoff";
+  actor_email: string;
+  actor_label?: string;
+  comments?: string;
+  decided_at: string;
+}
+
 interface SubmissionDetail {
   id: string;
   form_slug: string;
@@ -17,6 +26,13 @@ interface SubmissionDetail {
   form_title: string | null;
   data: Record<string, unknown>;
   status: "new" | "in_review" | "completed" | "spam" | "archived";
+  workflow_state: {
+    status?: "pending" | "in_progress" | "completed" | "rejected" | "expired";
+    current_step_id?: string | null;
+    history?: WorkflowHistoryRow[];
+    started_at?: string;
+    completed_at?: string;
+  } | null;
   reviewer_notes: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
@@ -338,6 +354,45 @@ export default function SubmissionDetailPage({
               Save notes
             </Button>
           </section>
+
+          {submission.workflow_state && (
+            <section className="space-y-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+                Workflow
+              </h2>
+              <p className="text-xs">
+                Status:{" "}
+                <strong className="text-foreground">
+                  {submission.workflow_state.status?.replace("_", " ") ?? "—"}
+                </strong>
+                {submission.workflow_state.current_step_id ? (
+                  <>
+                    {" · current step: "}
+                    <code>{submission.workflow_state.current_step_id}</code>
+                  </>
+                ) : null}
+              </p>
+              <ol className="border-l-2 border-border pl-3 space-y-2 text-xs">
+                {(submission.workflow_state.history ?? []).map((h, i) => (
+                  <li key={i}>
+                    <div className="text-foreground">
+                      <strong>{h.actor_email}</strong>{" "}
+                      <span className="text-muted">{h.action}</span>{" "}
+                      <code className="text-muted">{h.step_id}</code>
+                    </div>
+                    <div className="text-muted">
+                      {new Date(h.decided_at).toLocaleString()}
+                    </div>
+                    {h.comments && (
+                      <div className="text-foreground italic mt-0.5">
+                        “{h.comments}”
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
         </aside>
       </div>
     </FormLayout>
