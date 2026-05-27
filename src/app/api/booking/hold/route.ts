@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 
 const HOLD_DURATION_MINUTES = 15;
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     // Clean up expired holds first
     await supabase
@@ -128,7 +128,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     const { error } = await supabase
       .from("slot_holds")
