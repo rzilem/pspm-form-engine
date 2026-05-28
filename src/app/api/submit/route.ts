@@ -73,7 +73,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const { formSlug, data, recaptchaToken } = envelope.data;
+    const { formSlug, data, recaptchaToken, hp } = envelope.data;
+
+    // Honeypot: a hidden field real users never fill. Bots auto-complete
+    // every input, so a non-empty value is almost certainly a bot. Reject
+    // quietly (generic message) so we don't teach scrapers the field name.
+    if (hp && hp.trim() !== "") {
+      logger.warn("Honeypot triggered", { formSlug });
+      return Response.json({ error: "Submission rejected." }, { status: 400 });
+    }
 
     // Resolve the form: legacy hand-coded first, then form_definitions.
     // We hold onto the definition (for dynamic forms) so downstream stages

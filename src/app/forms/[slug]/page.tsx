@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { FormLayout } from "@/components/forms/FormLayout";
+import { EmbedAutoHeight } from "@/components/forms/EmbedAutoHeight";
 import { loadFormDefinition } from "@/lib/form-loader";
 import { DynamicForm } from "./DynamicForm";
 
@@ -10,6 +11,7 @@ export const revalidate = 0;
 
 interface PageProps {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ embed?: string }>;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -24,12 +26,33 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function DynamicFormPage({ params }: PageProps) {
+export default async function DynamicFormPage({ params, searchParams }: PageProps) {
   const { slug } = await params;
+  const { embed } = await searchParams;
   const definition = await loadFormDefinition(slug);
 
   if (!definition) {
     notFound();
+  }
+
+  // Embed mode (?embed=1): drop the PSPM header/footer chrome so the form
+  // sits cleanly inside an iframe on psprop.net, and report height to the
+  // host page for auto-resize.
+  if (embed === "1") {
+    return (
+      <main className="min-h-screen bg-background px-4 py-6">
+        <div className="mx-auto max-w-3xl">
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold text-navy">{definition.title}</h1>
+            {definition.description && (
+              <p className="mt-1 text-sm text-muted">{definition.description}</p>
+            )}
+          </div>
+          <DynamicForm definition={definition} />
+        </div>
+        <EmbedAutoHeight slug={slug} />
+      </main>
+    );
   }
 
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FormProvider,
   useForm,
@@ -16,6 +16,22 @@ import { Button } from "@/components/ui/Button";
 const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api/submit`
   : "/api/submit";
+
+// Optional reCAPTCHA v3. When NEXT_PUBLIC_RECAPTCHA_SITE_KEY is set (and the
+// matching RECAPTCHA_SECRET_KEY is set server-side) the form fetches a token
+// on submit and the server enforces it. When unset, the form submits without
+// a token and the server fails open — the honeypot below is the always-on
+// spam guard. This makes reCAPTCHA a progressive enhancement, not a fake badge.
+const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY ?? "";
+
+declare global {
+  interface Window {
+    grecaptcha?: {
+      ready: (cb: () => void) => void;
+      execute: (siteKey: string, opts: { action: string }) => Promise<string>;
+    };
+  }
+}
 
 interface FormEngineProps<T extends FieldValues> {
   schema: z.ZodType<T>;
@@ -40,6 +56,18 @@ function FormEngine<T extends FieldValues>({
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const honeypotRef = useRef<HTMLInputElement>(null);
+
+  // Lazy-load the reCAPTCHA v3 script only when a site key is configured.
+  useEffect(() => {
+    if (!RECAPTCHA_SITE_KEY) return;
+    if (document.getElementById("recaptcha-v3")) return;
+    const s = document.createElement("script");
+    s.id = "recaptcha-v3";
+    s.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
+    s.async = true;
+    document.head.appendChild(s);
+  }, []);
 
   const methods = useForm<T>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,10 +88,32 @@ function FormEngine<T extends FieldValues>({
   async function onSubmit(data: T) {
     setSubmitError(null);
     try {
+      // Fetch a reCAPTCHA v3 token when configured. On any failure, submit
+      // without one — the server fails open when no secret is set and the
+      // honeypot still guards, so a script hiccup never blocks a real user.
+      let recaptchaToken: string | undefined;
+      if (RECAPTCHA_SITE_KEY && typeof window !== "undefined" && window.grecaptcha) {
+        try {
+          const grecaptcha = window.grecaptcha;
+          recaptchaToken = await new Promise<string>((resolve, reject) => {
+            grecaptcha.ready(() => {
+              grecaptcha
+                .execute(RECAPTCHA_SITE_KEY, { action: "submit" })
+                .then(resolve)
+                .catch(reject);
+            });
+          });
+        } catch {
+          recaptchaToken = undefined;
+        }
+      }
+
+      const hp = honeypotRef.current?.value ?? "";
+
       const response = await fetch(SUBMIT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formSlug, data }),
+        body: JSON.stringify({ formSlug, data, recaptchaToken, hp }),
       });
 
       if (!response.ok) {
@@ -124,30 +174,48 @@ function FormEngine<T extends FieldValues>({
           setValue,
         })}
 
-        {/* reCAPTCHA placeholder */}
+        {/* Honeypot — hidden from humans, auto-filled by bots. The server
+            rejects any submission where this is non-empty. Do not remove. */}
         <div
-          className="flex items-center gap-2 rounded-[8px] border border-border px-4 py-3 text-xs text-muted"
-          aria-label="reCAPTCHA verification"
+          aria-hidden="true"
+          className="absolute -left-[9999px] top-0 h-0 w-0 overflow-hidden"
         >
-          <svg
-            className="w-5 h-5 text-muted"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-            />
-          </svg>
-          <span>
-            Protected by reCAPTCHA.{" "}
-            <span className="text-muted/60">(Integration pending)</span>
-          </span>
+          <label htmlFor="company_website">Company website (leave blank)</label>
+          <input
+            ref={honeypotRef}
+            type="text"
+            id="company_website"
+            name="company_website"
+            tabIndex={-1}
+            autoComplete="off"
+            defaultValue=""
+          />
         </div>
+
+        {/* reCAPTCHA disclosure — only shown when reCAPTCHA is actually active. */}
+        {RECAPTCHA_SITE_KEY && (
+          <p className="text-xs text-muted">
+            This site is protected by reCAPTCHA and the Google{" "}
+            <a
+              href="https://policies.google.com/privacy"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              Privacy Policy
+            </a>{" "}
+            and{" "}
+            <a
+              href="https://policies.google.com/terms"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              Terms of Service
+            </a>{" "}
+            apply.
+          </p>
+        )}
 
         {submitError && (
           <div

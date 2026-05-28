@@ -311,7 +311,7 @@ export default function InsuranceFormPage() {
                   i === stepIndex
                     ? "bg-primary text-white border-primary"
                     : i < stepIndex
-                      ? "bg-brand-blue-light text-primary border-primary/30"
+                      ? "bg-primary-light text-primary border-primary/30"
                       : "bg-white text-muted border-border"
                 }`}
                 aria-current={i === stepIndex ? "step" : undefined}

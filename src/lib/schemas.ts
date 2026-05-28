@@ -323,6 +323,11 @@ export const submissionSchema = z.object({
   formSlug: z.string().min(1),
   data: z.record(z.string(), z.unknown()),
   recaptchaToken: z.string().optional(),
+  // Honeypot. A hidden field real users never see; bots auto-fill it.
+  // The route rejects (and logs) the submission when this is non-empty.
+  // Free spam protection with no external dependency (unlike reCAPTCHA,
+  // which is an optional enhancement gated on a configured site/secret key).
+  hp: z.string().optional(),
 });
 
 export type SubmissionPayload = z.infer<typeof submissionSchema>;
