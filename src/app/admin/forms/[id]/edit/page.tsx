@@ -191,6 +191,22 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
     setUnparseableCount(0);
   }, []);
 
+  // Collapsing the Advanced JSON section discards an invalid draft and reverts
+  // to the visual builder's fields, so a bad JSON edit can't permanently block
+  // saves. Skipped in repair mode (unparseableCount > 0), where the raw schema
+  // must persist until the admin fixes it.
+  const handleAdvancedToggle = useCallback(
+    (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+      if (e.currentTarget.open) return;
+      if (unparseableCount > 0) return;
+      if (fieldJsonError) {
+        setFieldJsonDraft(JSON.stringify(fields, null, 2));
+        setFieldJsonError(null);
+      }
+    },
+    [fields, fieldJsonError, unparseableCount],
+  );
+
   async function handleSave(targetStatus?: "draft" | "published" | "archived") {
     setSaving(true);
     setSaveStatus(null);
@@ -400,6 +416,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
 
           <details
             open={unparseableCount > 0}
+            onToggle={handleAdvancedToggle}
             className="rounded-[8px] border border-border px-3 py-2"
           >
             <summary className="cursor-pointer text-sm font-medium text-foreground">

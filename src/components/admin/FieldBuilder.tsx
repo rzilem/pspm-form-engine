@@ -186,6 +186,18 @@ function FieldCard({
   const showNumberValidation = field.type === "number";
   const showValidationSection = showLengthValidation || showNumberValidation;
 
+  // Flag a malformed regex so the admin sees it here. The schema builder also
+  // guards new RegExp, so a bad pattern is ignored rather than crashing the
+  // form — but silently ignoring it would be surprising.
+  let patternError: string | undefined;
+  if (field.validation?.pattern) {
+    try {
+      new RegExp(field.validation.pattern);
+    } catch {
+      patternError = "Not a valid regular expression — this pattern will be ignored.";
+    }
+  }
+
   return (
     <div className="rounded-[12px] border border-border bg-white p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -309,6 +321,7 @@ function FieldCard({
                   }
                   className="sm:col-span-2"
                   helperText="Advanced. e.g. ^[A-Z]{2}[0-9]{4}$"
+                  error={patternError ? { message: patternError } : undefined}
                 />
                 <TextInput
                   label="Pattern error message"

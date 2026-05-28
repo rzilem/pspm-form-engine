@@ -217,19 +217,22 @@ export function buildSubmissionSchema(
   fields: FieldDefinition[],
 ): z.ZodType<Record<string, unknown>> {
   const shape: Record<string, z.ZodTypeAny> = {};
+  // Conditional fields are validated only when their condition is met. We keep
+  // the field's full "present" validator here and run it inside the superRefine
+  // below, so (a) a since-hidden field's stale value is ignored entirely and
+  // (b) required + format are both enforced when the field is shown.
+  const conditionalLeaves: { field: FieldDefinition; leaf: z.ZodTypeAny }[] = [];
 
   for (const f of fields) {
     if (f.type === "section_break") continue;
 
     let leaf: z.ZodTypeAny;
 
-    // A field with conditional logic must be submittable while it is hidden
-    // (its condition not met), so it is NEVER unconditionally required at the
-    // leaf level — the superRefine pass below enforces required-when-the-
-    // condition-is-met. Only non-conditional required fields get a hard leaf
-    // constraint.
     const isConditional = Boolean(f.conditionalOn);
-    const unconditionallyRequired = Boolean(f.required) && !isConditional;
+    // Required enforcement is applied as if the field is present/shown. For
+    // non-conditional fields that is the final word; for conditional fields it
+    // only takes effect via the superRefine when the condition matches.
+    const requiredWhenPresent = Boolean(f.required);
 
     switch (f.type) {
       case "email":
@@ -269,10 +272,8 @@ export function buildSubmissionSchema(
           );
         break;
       case "consent":
-        // Consent must be checked (true) when unconditionally required;
-        // optional otherwise (a conditional consent is enforced by the
-        // superRefine only when its condition is met).
-        leaf = unconditionallyRequired
+        // Consent must be checked (true) when required; optional otherwise.
+        leaf = requiredWhenPresent
           ? z.literal(true, { message: "You must agree to continue" })
           : z.boolean().optional();
         break;
@@ -281,7 +282,7 @@ export function buildSubmissionSchema(
           first: z.string().max(100),
           last: z.string().max(100),
         });
-        if (unconditionallyRequired) {
+        if (requiredWhenPresent) {
           leaf = (leaf as z.ZodObject<z.ZodRawShape>).refine(
             (v: { first?: string; last?: string }) =>
               Boolean(v?.first?.trim()) && Boolean(v?.last?.trim()),
@@ -296,6 +297,21 @@ export function buildSubmissionSchema(
           state: z.string().max(50).optional(),
           zip: z.string().max(20).optional(),
         });
+        if (requiredWhenPresent) {
+          leaf = (leaf as z.ZodObject<z.ZodRawShape>).refine(
+            (v: {
+              street?: string;
+              city?: string;
+              state?: string;
+              zip?: string;
+            }) =>
+              Boolean(v?.street?.trim()) &&
+              Boolean(v?.city?.trim()) &&
+              Boolean(v?.state?.trim()) &&
+              Boolean(v?.zip?.trim()),
+            { message: `${f.label} is required` },
+          );
+        }
         break;
       case "date":
         leaf = z.string();
@@ -320,10 +336,15 @@ export function buildSubmissionSchema(
           s = s.max(f.type === "textarea" ? 10000 : 500);
         }
         if (f.validation?.pattern) {
-          s = s.regex(
-            new RegExp(f.validation.pattern),
-            f.validation.patternMessage ?? "Invalid format",
-          );
+          // A malformed pattern saved on the form must not crash schema
+          // building (which runs on every render and submit). Skip an invalid
+          // regex rather than throwing from `new RegExp`.
+          try {
+            const re = new RegExp(f.validation.pattern);
+            s = s.regex(re, f.validation.patternMessage ?? "Invalid format");
+          } catch {
+            // Invalid pattern — ignore the constraint.
+          }
         }
         leaf = s;
         break;
@@ -333,7 +354,7 @@ export function buildSubmissionSchema(
     // Required gating. For string-ish leaves we treat empty string as missing
     // so that `required: false` doesn't reject blank fields. file_upload
     // (array) and signature (string) need their own required predicates.
-    if (unconditionallyRequired && f.type !== "consent" && f.type !== "name") {
+    if (requiredWhenPresent && f.type !== "consent" && f.type !== "name" && f.type !== "address") {
       if (f.type === "file_upload") {
         leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
           1,
@@ -346,67 +367,53 @@ export function buildSubmissionSchema(
       } else if (leaf instanceof z.ZodString) {
         leaf = leaf.min(1, `${f.label} is required`);
       }
-    } else if (f.type !== "consent" && !(f.type === "name" && unconditionallyRequired)) {
-      if (isConditional) {
-        // A hidden conditional field still carries its empty default ("" for
-        // text/email/phone/choice, etc.). Coerce empty -> undefined so leaf
-        // constraints (email(), enum, min) don't reject the placeholder before
-        // the superRefine can decide the condition isn't met. The superRefine
-        // (which reads the coerced value) enforces required-when-shown.
-        leaf = z.preprocess(
-          (v) => (v === "" || v === null ? undefined : v),
-          leaf.optional(),
-        );
-      } else {
-        // Explicitly-optional, non-conditional field.
-        leaf = leaf.optional();
-      }
+    } else if (
+      !requiredWhenPresent &&
+      f.type !== "consent" &&
+      f.type !== "name" &&
+      f.type !== "address"
+    ) {
+      // Optional field. RHF initializes most controls to "", but Zod only
+      // treats `undefined` as absent — so coerce ""/null -> undefined before
+      // .optional(), or a blank email/phone/select fails its format check and
+      // a blank number silently coerces to 0.
+      leaf = z.preprocess(
+        (v) => (v === "" || v === null ? undefined : v),
+        leaf.optional(),
+      );
     }
 
-    // Conditional fields: when `conditionalOn` is set the field is optional
-    // unless the trigger condition is met. Server-side this is enforced via
-    // a `superRefine` on the parent object; we capture the rule here via a
-    // sentinel attribute the refine pass reads back.
-    shape[f.id] = leaf;
+    // Conditional fields are validated only when shown — defer the leaf to the
+    // superRefine and keep the shape permissive so a since-hidden field's stale
+    // value can never fail validation.
+    if (isConditional) {
+      conditionalLeaves.push({ field: f, leaf });
+      shape[f.id] = z.unknown().optional();
+    } else {
+      shape[f.id] = leaf;
+    }
   }
 
   let obj = z.object(shape) as unknown as z.ZodType<Record<string, unknown>>;
 
-  // Apply conditional-required rules in a single superRefine pass so we
-  // can inspect sibling fields.
-  const conditionals = fields.filter(
-    (f) => f.required && f.conditionalOn && f.type !== "section_break",
-  );
-  if (conditionals.length > 0) {
+  // Validate each conditional field with its own "present" leaf, but only when
+  // its trigger condition is met. When it isn't, the field is hidden and its
+  // value (which RHF keeps after the field unmounts) is ignored entirely.
+  if (conditionalLeaves.length > 0) {
     obj = (obj as unknown as z.ZodObject<z.ZodRawShape>).superRefine(
       (data: Record<string, unknown>, ctx: z.RefinementCtx) => {
-        for (const f of conditionals) {
+        for (const { field: f, leaf } of conditionalLeaves) {
           if (!f.conditionalOn) continue;
           const trigger = data[f.conditionalOn.fieldId];
           const matches = Array.isArray(f.conditionalOn.equals)
             ? f.conditionalOn.equals.includes(String(trigger ?? ""))
             : String(trigger ?? "") === f.conditionalOn.equals;
           if (!matches) continue;
-          const value = data[f.id];
-          let missing: boolean;
-          if (f.type === "consent") {
-            missing = value !== true;
-          } else if (f.type === "name") {
-            const v = value as { first?: string; last?: string } | undefined;
-            missing = !v || !v.first?.trim() || !v.last?.trim();
-          } else {
-            missing =
-              value === undefined ||
-              value === null ||
-              (typeof value === "string" && value.trim() === "") ||
-              (Array.isArray(value) && value.length === 0);
-          }
-          if (missing) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `${f.label} is required`,
-              path: [f.id],
-            });
+          const result = leaf.safeParse(data[f.id]);
+          if (!result.success) {
+            for (const issue of result.error.issues) {
+              ctx.addIssue({ ...issue, path: [f.id, ...issue.path] });
+            }
           }
         }
       },
