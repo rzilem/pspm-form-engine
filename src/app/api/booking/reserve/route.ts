@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { generateConfirmationCode, generateManageToken } from "@/lib/booking";
 import { logger } from "@/lib/logger";
 import { sendAdminBookingNotification } from "@/lib/email";
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing resident information" }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     // 1. Get amenity
     const { data: amenity, error: amenityErr } = await supabase
