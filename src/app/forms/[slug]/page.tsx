@@ -42,7 +42,9 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
     return (
       // No min-h-screen in embed mode: the wrapper must size to its content so
       // the iframe can shrink when conditional fields hide or errors clear.
-      <main className="bg-background px-4 py-6">
+      // EmbedAutoHeight measures this element (not body, which RootLayout pins
+      // to min-h-full).
+      <main id="pspm-embed-root" className="bg-background px-4 py-6">
         <div className="mx-auto max-w-3xl">
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-navy">{definition.title}</h1>

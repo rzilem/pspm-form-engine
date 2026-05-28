@@ -90,7 +90,23 @@ function makeFieldId(label: string, taken: ReadonlySet<string>): string {
 export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
   const updateField = useCallback(
     (index: number, patch: Partial<FieldDefinition>) => {
-      onChange(value.map((f, i) => (i === index ? { ...f, ...patch } : f)));
+      const next = value.map((f, i) => (i === index ? { ...f, ...patch } : f));
+      const updated = next[index];
+      // A section break can't be a trigger (no submitted value), so if this
+      // field just became one, drop conditional logic in fields that pointed at
+      // it — a dangling trigger would hide/wrongly-show dependents at runtime.
+      if (updated?.type === "section_break") {
+        const id = updated.id;
+        onChange(
+          next.map((f, i) =>
+            i !== index && f.conditionalOn?.fieldId === id
+              ? { ...f, conditionalOn: undefined }
+              : f,
+          ),
+        );
+        return;
+      }
+      onChange(next);
     },
     [value, onChange],
   );

@@ -30,10 +30,11 @@ const PARENT_ORIGINS = (
  */
 export function EmbedAutoHeight({ slug }: { slug: string }) {
   useEffect(() => {
+    // Measure the embed wrapper, not <body>: RootLayout pins body to min-h-full
+    // so body.scrollHeight is at least the iframe viewport and can't shrink.
+    const target = document.getElementById("pspm-embed-root") ?? document.body;
     function post() {
-      // body.scrollHeight reflects the actual rendered content height and can
-      // shrink (documentElement is clamped by the viewport in an iframe).
-      const height = Math.ceil(document.body.scrollHeight);
+      const height = Math.ceil(target.getBoundingClientRect().height);
       const msg = { type: "pspm-form:height", slug, height };
       for (const origin of PARENT_ORIGINS) {
         window.parent?.postMessage(msg, origin);
@@ -44,9 +45,9 @@ export function EmbedAutoHeight({ slug }: { slug: string }) {
     // conditional fields / validation errors / upload widgets being added or
     // removed, which change height without resizing the observed box.
     const resizeObserver = new ResizeObserver(() => post());
-    resizeObserver.observe(document.body);
+    resizeObserver.observe(target);
     const mutationObserver = new MutationObserver(() => post());
-    mutationObserver.observe(document.body, {
+    mutationObserver.observe(target, {
       childList: true,
       subtree: true,
       attributes: true,
