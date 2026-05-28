@@ -278,42 +278,47 @@ export function buildSubmissionSchema(
           ? z.literal(true, { message: "You must agree to continue" })
           : z.boolean().optional();
         break;
-      case "name":
-        leaf = z.object({
+      case "name": {
+        const base = z.object({
           first: z.string().max(100),
           last: z.string().max(100),
         });
-        if (requiredWhenPresent) {
-          leaf = (leaf as z.ZodObject<z.ZodRawShape>).refine(
-            (v: { first?: string; last?: string }) =>
-              Boolean(v?.first?.trim()) && Boolean(v?.last?.trim()),
-            { message: "First and last name are required" },
-          );
-        }
+        // Composite fields are excluded from the generic gating block below, so
+        // apply required/optional here: required -> non-blank refine; optional
+        // -> .optional() so an omitted value (undefined) is accepted.
+        leaf = requiredWhenPresent
+          ? base.refine(
+              (v: { first?: string; last?: string }) =>
+                Boolean(v?.first?.trim()) && Boolean(v?.last?.trim()),
+              { message: "First and last name are required" },
+            )
+          : base.optional();
         break;
-      case "address":
-        leaf = z.object({
+      }
+      case "address": {
+        const base = z.object({
           street: z.string().max(200).optional(),
           city: z.string().max(100).optional(),
           state: z.string().max(50).optional(),
           zip: z.string().max(20).optional(),
         });
-        if (requiredWhenPresent) {
-          leaf = (leaf as z.ZodObject<z.ZodRawShape>).refine(
-            (v: {
-              street?: string;
-              city?: string;
-              state?: string;
-              zip?: string;
-            }) =>
-              Boolean(v?.street?.trim()) &&
-              Boolean(v?.city?.trim()) &&
-              Boolean(v?.state?.trim()) &&
-              Boolean(v?.zip?.trim()),
-            { message: `${f.label} is required` },
-          );
-        }
+        leaf = requiredWhenPresent
+          ? base.refine(
+              (v: {
+                street?: string;
+                city?: string;
+                state?: string;
+                zip?: string;
+              }) =>
+                Boolean(v?.street?.trim()) &&
+                Boolean(v?.city?.trim()) &&
+                Boolean(v?.state?.trim()) &&
+                Boolean(v?.zip?.trim()),
+              { message: `${f.label} is required` },
+            )
+          : base.optional();
         break;
+      }
       case "date":
         leaf = z.string();
         break;
@@ -472,7 +477,9 @@ export function resolveVisibleFieldIds(
 
   const visible = new Set<string>();
   for (const f of fields) {
-    if (f.type === "section_break" || isVisible(f.id)) visible.add(f.id);
+    // Section breaks are headings, not data — but they can still carry
+    // conditionalOn, so a heading inside a hidden branch must hide too.
+    if (isVisible(f.id)) visible.add(f.id);
   }
   return visible;
 }
