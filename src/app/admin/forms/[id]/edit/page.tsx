@@ -8,8 +8,32 @@ import { Button } from "@/components/ui/Button";
 import { TextInput } from "@/components/ui/TextInput";
 import { TextArea } from "@/components/ui/TextArea";
 import { SelectField } from "@/components/ui/SelectField";
+import { FieldBuilder } from "@/components/admin/FieldBuilder";
+import {
+  fieldDefinitionSchema,
+  type FieldDefinition,
+} from "@/lib/form-definitions";
+import { z } from "zod";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
+// Tolerant guard for the JSONB field_schema coming back from the API as
+// `unknown`. Drops anything that isn't a valid FieldDefinition rather than
+// throwing, so a partially-malformed row still loads into the builder.
+const fieldArraySchema = z.array(fieldDefinitionSchema);
+
+function parseFieldSchema(raw: unknown): FieldDefinition[] {
+  if (!Array.isArray(raw)) return [];
+  const result = fieldArraySchema.safeParse(raw);
+  if (result.success) return result.data;
+  // Fall back to per-item parsing so one bad field doesn't blank the form.
+  const out: FieldDefinition[] = [];
+  for (const item of raw) {
+    const parsed = fieldDefinitionSchema.safeParse(item);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
+}
 
 interface FormDefinitionRow {
   id: string;
@@ -49,7 +73,9 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [status, setStatus] = useState<"draft" | "published" | "archived">("draft");
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const [recaptchaRequired, setRecaptchaRequired] = useState(true);
-  const [fieldSchemaJson, setFieldSchemaJson] = useState("[]");
+  const [fields, setFields] = useState<FieldDefinition[]>([]);
+  const [fieldJsonDraft, setFieldJsonDraft] = useState("[]");
+  const [fieldJsonError, setFieldJsonError] = useState<string | null>(null);
   const [notificationConfigJson, setNotificationConfigJson] = useState('{"rules":[]}');
   const [pdfEnabled, setPdfEnabled] = useState(false);
   const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
@@ -77,7 +103,10 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       setStatus(data.status);
       setConfirmationMessage(data.confirmation_message);
       setRecaptchaRequired(data.recaptcha_required);
-      setFieldSchemaJson(JSON.stringify(data.field_schema ?? [], null, 2));
+      const loadedFields = parseFieldSchema(data.field_schema);
+      setFields(loadedFields);
+      setFieldJsonDraft(JSON.stringify(loadedFields, null, 2));
+      setFieldJsonError(null);
       setNotificationConfigJson(
         JSON.stringify(data.notification_config ?? { rules: [] }, null, 2),
       );
@@ -98,21 +127,54 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
     void load();
   }, [load]);
 
+  // Visual builder is the source of truth. Mirror every change into the
+  // Advanced JSON view and clear any stale parse error.
+  const handleFieldsChange = useCallback((next: FieldDefinition[]) => {
+    setFields(next);
+    setFieldJsonDraft(JSON.stringify(next, null, 2));
+    setFieldJsonError(null);
+  }, []);
+
+  // Advanced JSON edits flow back into the builder when they parse against the
+  // FieldDefinition contract; otherwise we surface the error and leave the
+  // builder untouched.
+  const handleFieldJsonChange = useCallback((text: string) => {
+    setFieldJsonDraft(text);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      setFieldJsonError("Invalid JSON.");
+      return;
+    }
+    const result = fieldArraySchema.safeParse(parsed);
+    if (!result.success) {
+      setFieldJsonError(
+        "JSON parsed but does not match the field schema (each field needs id, label, and a valid type).",
+      );
+      return;
+    }
+    setFieldJsonError(null);
+    setFields(result.data);
+  }, []);
+
   async function handleSave(targetStatus?: "draft" | "published" | "archived") {
     setSaving(true);
     setSaveStatus(null);
     setValidationError(null);
     try {
-      // Parse JSON locally first so we can show a clean error before
-      // round-tripping to the server.
-      let fieldSchema: unknown;
-      let notificationConfig: unknown;
-      try {
-        fieldSchema = JSON.parse(fieldSchemaJson);
-      } catch {
-        setValidationError("Field schema is not valid JSON.");
+      // The visual FieldBuilder is the source of truth for fields. If the
+      // Advanced JSON view has an unresolved parse error, block the save so
+      // we don't silently persist stale field state.
+      if (fieldJsonError) {
+        setValidationError(
+          "Field schema (Advanced JSON) is not valid JSON. Fix it or collapse the Advanced section to use the visual builder.",
+        );
         return;
       }
+      // Parse the remaining JSON textareas locally first so we can show a
+      // clean error before round-tripping to the server.
+      let notificationConfig: unknown;
       try {
         notificationConfig = JSON.parse(notificationConfigJson);
       } catch {
@@ -139,7 +201,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           status: targetStatus ?? status,
           confirmation_message: confirmationMessage,
           recaptcha_required: recaptchaRequired,
-          field_schema: fieldSchema,
+          field_schema: fields,
           notification_config: notificationConfig,
           pdf_config: {
             enabled: pdfEnabled,
@@ -277,22 +339,36 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           )}
         </section>
 
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-              Field schema (JSON)
-            </h2>
-            <span className="text-xs text-muted">
-              Drag-drop UI lands in Phase 1.2 — JSON-edit for now.
-            </span>
-          </div>
-          <textarea
-            className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
-            rows={16}
-            value={fieldSchemaJson}
-            onChange={(e) => setFieldSchemaJson(e.target.value)}
-            spellCheck={false}
-          />
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+            Form fields
+          </h2>
+          <FieldBuilder value={fields} onChange={handleFieldsChange} />
+
+          <details className="rounded-[8px] border border-border px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">
+              Advanced: edit as JSON
+            </summary>
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-muted">
+                The visual builder above is the source of truth. Paste or edit
+                JSON here to bulk-replace the fields — valid changes sync back
+                into the builder.
+              </p>
+              <textarea
+                className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                rows={16}
+                value={fieldJsonDraft}
+                onChange={(e) => handleFieldJsonChange(e.target.value)}
+                spellCheck={false}
+              />
+              {fieldJsonError && (
+                <p className="text-xs text-error" role="alert">
+                  {fieldJsonError}
+                </p>
+              )}
+            </div>
+          </details>
         </section>
 
         <section className="space-y-2">
