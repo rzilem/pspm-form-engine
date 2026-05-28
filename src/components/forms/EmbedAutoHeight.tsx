@@ -31,18 +31,30 @@ const PARENT_ORIGINS = (
 export function EmbedAutoHeight({ slug }: { slug: string }) {
   useEffect(() => {
     function post() {
-      const height = Math.ceil(document.documentElement.scrollHeight);
+      // body.scrollHeight reflects the actual rendered content height and can
+      // shrink (documentElement is clamped by the viewport in an iframe).
+      const height = Math.ceil(document.body.scrollHeight);
       const msg = { type: "pspm-form:height", slug, height };
       for (const origin of PARENT_ORIGINS) {
         window.parent?.postMessage(msg, origin);
       }
     }
     post();
-    const observer = new ResizeObserver(() => post());
-    observer.observe(document.documentElement);
+    // ResizeObserver catches box-size changes; MutationObserver catches
+    // conditional fields / validation errors / upload widgets being added or
+    // removed, which change height without resizing the observed box.
+    const resizeObserver = new ResizeObserver(() => post());
+    resizeObserver.observe(document.body);
+    const mutationObserver = new MutationObserver(() => post());
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
     window.addEventListener("load", post);
     return () => {
-      observer.disconnect();
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
       window.removeEventListener("load", post);
     };
   }, [slug]);

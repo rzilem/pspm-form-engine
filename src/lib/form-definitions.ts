@@ -361,7 +361,7 @@ export function buildSubmissionSchema(
     // so that `required: false` doesn't reject blank fields. file_upload
     // (array) and signature (string) need their own required predicates.
     if (requiredWhenPresent && f.type !== "consent" && f.type !== "name" && f.type !== "address") {
-      if (f.type === "file_upload") {
+      if (f.type === "file_upload" || f.type === "checkbox_group") {
         leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
           1,
           `${f.label} is required`,

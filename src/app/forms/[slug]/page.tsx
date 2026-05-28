@@ -40,7 +40,9 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
   // host page for auto-resize.
   if (embed === "1") {
     return (
-      <main className="min-h-screen bg-background px-4 py-6">
+      // No min-h-screen in embed mode: the wrapper must size to its content so
+      // the iframe can shrink when conditional fields hide or errors clear.
+      <main className="bg-background px-4 py-6">
         <div className="mx-auto max-w-3xl">
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-navy">{definition.title}</h1>

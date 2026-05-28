@@ -112,7 +112,19 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
       const f = value[index];
       const name = f?.label?.trim() || f?.id || "this field";
       if (!confirm(`Delete "${name}"? This cannot be undone until you save.`)) return;
-      onChange(value.filter((_, i) => i !== index));
+      const deletedId = f?.id;
+      // Also drop any conditional logic that pointed at the deleted field —
+      // a dangling conditionalOn.fieldId would leave dependents permanently
+      // hidden (or wrongly shown for equals: "") at runtime.
+      onChange(
+        value
+          .filter((_, i) => i !== index)
+          .map((other) =>
+            other.conditionalOn?.fieldId === deletedId
+              ? { ...other, conditionalOn: undefined }
+              : other,
+          ),
+      );
     },
     [value, onChange],
   );
@@ -495,7 +507,10 @@ function ConditionalEditor({
       onPatch({ conditionalOn: undefined });
       return;
     }
-    const firstId = candidates[0]?.id ?? "";
+    // Don't create a condition with no trigger — an empty fieldId fails the
+    // schema on save and the toggle is disabled in that case anyway.
+    const firstId = candidates[0]?.id;
+    if (!firstId) return;
     onPatch({ conditionalOn: { fieldId: firstId, equals: "" } });
   };
 
@@ -509,11 +524,18 @@ function ConditionalEditor({
           <input
             type="checkbox"
             checked={enabled}
+            disabled={candidates.length === 0}
             onChange={(e) => toggle(e.target.checked)}
-            className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+            className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
           />
           Only show this field when another field has a specific value
         </label>
+        {candidates.length === 0 && (
+          <p className="text-xs text-muted">
+            Add another (non–section-break) field to use as the trigger before
+            enabling conditional logic.
+          </p>
+        )}
 
         {enabled && field.conditionalOn && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
