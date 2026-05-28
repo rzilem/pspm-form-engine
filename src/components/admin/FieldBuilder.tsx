@@ -60,6 +60,22 @@ const TYPES_WITH_LENGTH_VALIDATION: ReadonlySet<FieldType> = new Set<FieldType>(
   "textarea",
 ]);
 
+// Field types usable as a conditional trigger. The runtime resolver compares
+// trigger values with String(value), so only scalar fields work — arrays
+// (checkbox_group, file_upload) and objects (name, address) would stringify to
+// "a,b" / "[object Object]", and a signature data-URL / consent boolean make no
+// sense as an "equals" comparison.
+const TRIGGER_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
+  "text",
+  "textarea",
+  "email",
+  "phone",
+  "number",
+  "date",
+  "radio",
+  "select",
+]);
+
 /**
  * Generate a stable, collision-free id for a NEWLY added field.
  *
@@ -506,10 +522,10 @@ function ConditionalEditor({
 }: ConditionalEditorProps) {
   const enabled = Boolean(field.conditionalOn);
 
-  // Candidate trigger fields: any OTHER field that holds a value (i.e. not a
-  // section break, and not this field itself).
+  // Candidate trigger fields: any OTHER scalar field (the resolver compares
+  // with String(value), so arrays/objects/uploads/signatures can't be triggers).
   const candidates = allFields.filter(
-    (f, i) => i !== index && f.type !== "section_break",
+    (f, i) => i !== index && TRIGGER_FIELD_TYPES.has(f.type),
   );
 
   const equalsValue = field.conditionalOn
