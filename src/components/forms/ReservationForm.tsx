@@ -106,7 +106,7 @@ function ReservationForm({ config }: { config: ReservationConfig }) {
     [setValue]
   );
 
-  const handleHoldCreated = useCallback((hId: string, _expiresAt: string) => {
+  const handleHoldCreated = useCallback((hId: string) => {
     holdIdRef.current = hId;
   }, []);
 

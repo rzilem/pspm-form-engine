@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { DatePicker } from "@/components/booking/DatePicker";
 import { TimeSlotPicker } from "@/components/booking/TimeSlotPicker";
 
@@ -28,7 +28,7 @@ function BookingCalendar({
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<{ start: string; end: string } | null>(null);
   const [amenityId, setAmenityId] = useState<string | undefined>(externalAmenityId);
-  const sessionIdRef = useRef(crypto.randomUUID());
+  const [sessionId] = useState(() => crypto.randomUUID());
 
   // Fetch amenity ID if not provided
   const fetchAmenityId = useCallback(async () => {
@@ -102,7 +102,7 @@ function BookingCalendar({
           onHoldCreated={onHoldCreated}
           onHoldExpired={handleHoldExpired}
           amenityId={amenityId}
-          sessionId={sessionIdRef.current}
+          sessionId={sessionId}
         />
       )}
 

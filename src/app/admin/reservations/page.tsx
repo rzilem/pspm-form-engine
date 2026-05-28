@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { FormLayout } from "@/components/forms/FormLayout";
 import { Button } from "@/components/ui/Button";
 import { formatTime12h } from "@/lib/booking";
@@ -168,7 +168,7 @@ function AdminDashboard({ password }: { password: string }) {
     notes: "",
   });
 
-  const headers = { "X-Admin-Password": password };
+  const headers = useMemo(() => ({ "X-Admin-Password": password }), [password]);
 
   const fetchReservations = useCallback(async () => {
     setLoading(true);
@@ -203,7 +203,7 @@ function AdminDashboard({ password }: { password: string }) {
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, amenityFilter, searchQuery, dateFrom, dateTo, password]);
+  }, [page, statusFilter, amenityFilter, searchQuery, dateFrom, dateTo, headers]);
 
   useEffect(() => {
     void fetchReservations();

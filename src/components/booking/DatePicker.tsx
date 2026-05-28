@@ -76,7 +76,13 @@ function DatePicker({ amenitySlug, selectedDate, onDateSelect, className = "" }:
   }, [amenitySlug, viewYear, viewMonth, minDateStr, maxDateStr]);
 
   useEffect(() => {
-    void fetchMonthAvailability();
+    let cancelled = false;
+    void (async () => {
+      if (!cancelled) await fetchMonthAvailability();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [fetchMonthAvailability]);
 
   // Build calendar grid

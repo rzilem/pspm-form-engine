@@ -38,12 +38,6 @@ const WORKFLOW_PILL: Record<string, string> = {
   pending: "bg-primary-light text-primary",
 };
 
-function getPassword(): string {
-  return typeof document !== "undefined"
-    ? document.cookie.match(/admin_token=([^;]+)/)?.[1] ?? ""
-    : "";
-}
-
 function AdminLogin({ onLogin }: { onLogin: (pw: string) => void }) {
   const [pw, setPw] = useState("");
   return (

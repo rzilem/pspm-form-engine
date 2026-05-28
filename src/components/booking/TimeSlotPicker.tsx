@@ -45,31 +45,44 @@ function TimeSlotPicker({
   // Fetch slots for selected date
   useEffect(() => {
     if (!date || !amenitySlug) return;
+    let cancelled = false;
 
-    setLoading(true);
-    setError(null);
-
-    fetch(`${API_BASE}/api/booking/availability?amenity=${amenitySlug}&date=${date}`)
-      .then((r) => r.json())
-      .then((data: { slots?: TimeSlot[]; error?: string }) => {
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const r = await fetch(
+          `${API_BASE}/api/booking/availability?amenity=${amenitySlug}&date=${date}`
+        );
+        const data = (await r.json()) as { slots?: TimeSlot[]; error?: string };
+        if (cancelled) return;
         if (data.error) {
           setError(data.error);
           setSlots([]);
         } else {
           setSlots(data.slots ?? []);
         }
-      })
-      .catch(() => {
-        setError("Failed to load available times");
-        setSlots([]);
-      })
-      .finally(() => setLoading(false));
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load available times");
+          setSlots([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [amenitySlug, date]);
 
   // Countdown timer for hold
   useEffect(() => {
     if (!holdExpiresAt) {
-      setCountdown(0);
+      // countdown is already 0 by the time a hold clears (tick sets it before nulling)
       return;
     }
 
