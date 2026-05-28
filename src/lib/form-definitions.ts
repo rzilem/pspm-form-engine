@@ -398,47 +398,14 @@ export function buildSubmissionSchema(
   let obj = z.object(shape) as unknown as z.ZodType<Record<string, unknown>>;
 
   if (conditionalLeaves.length > 0) {
-    const fieldsById = new Map(fields.map((f) => [f.id, f]));
-
-    // A field is visible only if it isn't gated, OR its trigger is itself
-    // visible AND the trigger's value matches. Resolving visibility
-    // transitively means a field gated on a hidden field is also hidden (so a
-    // stale value RHF kept on the hidden ancestor can't reactivate a branch).
-    // Memoized per parse; the provisional `false` guards against cycles.
-    function isVisible(
-      fieldId: string,
-      data: Record<string, unknown>,
-      cache: Map<string, boolean>,
-    ): boolean {
-      const cached = cache.get(fieldId);
-      if (cached !== undefined) return cached;
-      const f = fieldsById.get(fieldId);
-      if (!f) return true; // unknown id → no gating
-      if (!f.conditionalOn) {
-        cache.set(fieldId, true);
-        return true;
-      }
-      cache.set(fieldId, false);
-      const triggerId = f.conditionalOn.fieldId;
-      let vis = false;
-      if (triggerId && isVisible(triggerId, data, cache)) {
-        const tv = data[triggerId];
-        vis = Array.isArray(f.conditionalOn.equals)
-          ? f.conditionalOn.equals.includes(String(tv ?? ""))
-          : String(tv ?? "") === f.conditionalOn.equals;
-      }
-      cache.set(fieldId, vis);
-      return vis;
-    }
-
     // Validate each conditional field with its own "present" leaf, but only
     // when it is genuinely visible. A hidden field's value (which RHF keeps
     // after the field unmounts) is neither validated nor stored.
     obj = (obj as unknown as z.ZodObject<z.ZodRawShape>)
       .superRefine((data: Record<string, unknown>, ctx: z.RefinementCtx) => {
-        const cache = new Map<string, boolean>();
+        const visible = resolveVisibleFieldIds(fields, data);
         for (const { field: f, leaf } of conditionalLeaves) {
-          if (!isVisible(f.id, data, cache)) continue;
+          if (!visible.has(f.id)) continue;
           const result = leaf.safeParse(data[f.id]);
           if (!result.success) {
             for (const issue of result.error.issues) {
@@ -448,18 +415,66 @@ export function buildSubmissionSchema(
         }
       })
       // Strip hidden conditional values from the parsed output so they are
-      // never persisted, emailed, or rendered in the generated PDF.
+      // never persisted/emailed/rendered, and normalize visible ones to the
+      // same Zod-coerced shape non-conditional fields get (e.g. "5" -> 5).
       .transform((data: Record<string, unknown>) => {
-        const cache = new Map<string, boolean>();
+        const visible = resolveVisibleFieldIds(fields, data);
         const out: Record<string, unknown> = { ...data };
-        for (const { field: f } of conditionalLeaves) {
-          if (!isVisible(f.id, data, cache)) delete out[f.id];
+        for (const { field: f, leaf } of conditionalLeaves) {
+          if (!visible.has(f.id)) {
+            delete out[f.id];
+            continue;
+          }
+          const result = leaf.safeParse(data[f.id]);
+          if (result.success) out[f.id] = result.data;
         }
         return out;
       }) as unknown as z.ZodType<Record<string, unknown>>;
   }
 
   return obj;
+}
+
+// Resolve which fields are currently visible for the given values. A field is
+// visible unless it is gated (`conditionalOn`) by a trigger that is itself
+// hidden OR whose value doesn't match — resolved transitively so a gate on a
+// hidden ancestor also hides the descendant. Shared by the server validator
+// (buildSubmissionSchema) and the client renderer (DynamicForm) so the two can
+// never disagree about which fields count. Section breaks are always "visible".
+export function resolveVisibleFieldIds(
+  fields: FieldDefinition[],
+  values: Record<string, unknown>,
+): Set<string> {
+  const fieldsById = new Map(fields.map((f) => [f.id, f]));
+  const cache = new Map<string, boolean>();
+
+  function isVisible(fieldId: string): boolean {
+    const cached = cache.get(fieldId);
+    if (cached !== undefined) return cached;
+    const f = fieldsById.get(fieldId);
+    if (!f) return true; // unknown trigger id → no gating
+    if (!f.conditionalOn) {
+      cache.set(fieldId, true);
+      return true;
+    }
+    cache.set(fieldId, false); // provisional, guards against cycles
+    const triggerId = f.conditionalOn.fieldId;
+    let vis = false;
+    if (triggerId && isVisible(triggerId)) {
+      const tv = values[triggerId];
+      vis = Array.isArray(f.conditionalOn.equals)
+        ? f.conditionalOn.equals.includes(String(tv ?? ""))
+        : String(tv ?? "") === f.conditionalOn.equals;
+    }
+    cache.set(fieldId, vis);
+    return vis;
+  }
+
+  const visible = new Set<string>();
+  for (const f of fields) {
+    if (f.type === "section_break" || isVisible(f.id)) visible.add(f.id);
+  }
+  return visible;
 }
 
 // ── Mustache-lite recipient resolver for notification routing ───────────

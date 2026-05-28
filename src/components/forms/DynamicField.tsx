@@ -29,17 +29,11 @@ interface DynamicFieldProps {
  * source of truth — this UI gate is purely cosmetic.
  */
 export function DynamicField({ field, formSlug }: DynamicFieldProps) {
-  const { register, formState, control, watch } = useFormContext();
+  const { register, formState, control } = useFormContext();
 
-  // Conditional visibility. Watching directly so the UI re-evaluates on
-  // every change without us writing a useEffect.
-  if (field.conditionalOn) {
-    const triggerValue = watch(field.conditionalOn.fieldId);
-    const matches = Array.isArray(field.conditionalOn.equals)
-      ? field.conditionalOn.equals.includes(String(triggerValue ?? ""))
-      : String(triggerValue ?? "") === field.conditionalOn.equals;
-    if (!matches) return null;
-  }
+  // Conditional visibility is decided by the parent (DynamicForm) via the
+  // shared transitive resolver, so this component only renders fields that
+  // should be shown and never needs to gate itself.
 
   const errMsg = formState.errors[field.id]?.message as string | undefined;
   const error = errMsg ? { message: errMsg } : undefined;

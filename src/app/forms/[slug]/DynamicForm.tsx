@@ -5,6 +5,7 @@ import { FormEngine } from "@/components/forms/FormEngine";
 import { DynamicField } from "@/components/forms/DynamicField";
 import {
   buildSubmissionSchema,
+  resolveVisibleFieldIds,
   type FormDefinition,
 } from "@/lib/form-definitions";
 
@@ -51,17 +52,29 @@ export function DynamicForm({ definition }: DynamicFormProps) {
       confirmationMessage={definition.confirmation_message}
       recaptcha={definition.recaptcha_required}
     >
-      {() => (
-        <div className="space-y-5">
-          {definition.field_schema.map((field) => (
-            <DynamicField
-              key={field.id}
-              field={field}
-              formSlug={definition.slug}
-            />
-          ))}
-        </div>
-      )}
+      {({ watch }) => {
+        // Compute visibility with the SAME transitive resolver the server uses,
+        // so the rendered fields always match what the server will validate and
+        // keep — a field gated on a now-hidden ancestor is hidden here too.
+        const values = watch() as Record<string, unknown>;
+        const visible = resolveVisibleFieldIds(
+          definition.field_schema,
+          values,
+        );
+        return (
+          <div className="space-y-5">
+            {definition.field_schema
+              .filter((field) => visible.has(field.id))
+              .map((field) => (
+                <DynamicField
+                  key={field.id}
+                  field={field}
+                  formSlug={definition.slug}
+                />
+              ))}
+          </div>
+        );
+      }}
     </FormEngine>
   );
 }
