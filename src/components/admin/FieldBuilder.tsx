@@ -108,10 +108,11 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
     (index: number, patch: Partial<FieldDefinition>) => {
       const next = value.map((f, i) => (i === index ? { ...f, ...patch } : f));
       const updated = next[index];
-      // A section break can't be a trigger (no submitted value), so if this
-      // field just became one, drop conditional logic in fields that pointed at
-      // it — a dangling trigger would hide/wrongly-show dependents at runtime.
-      if (updated?.type === "section_break") {
+      // Only scalar fields can be triggers (the resolver compares String(value)).
+      // If this field changed to a non-scalar type (section break, composite,
+      // array, signature, consent), drop conditional logic in fields that
+      // pointed at it — a dangling trigger would hide/wrongly-show dependents.
+      if (updated && !TRIGGER_FIELD_TYPES.has(updated.type)) {
         const id = updated.id;
         onChange(
           next.map((f, i) =>
