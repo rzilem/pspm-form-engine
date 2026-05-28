@@ -49,6 +49,7 @@ export function DynamicForm({ definition }: DynamicFormProps) {
       formSlug={definition.slug}
       defaultValues={defaultValues}
       confirmationMessage={definition.confirmation_message}
+      recaptcha={definition.recaptcha_required}
     >
       {() => (
         <div className="space-y-5">

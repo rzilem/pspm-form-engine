@@ -23,7 +23,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const fieldArraySchema = z.array(fieldDefinitionSchema);
 
 function parseFieldSchema(raw: unknown): { fields: FieldDefinition[]; dropped: number } {
-  if (!Array.isArray(raw)) return { fields: [], dropped: 0 };
+  // null/undefined is a legitimately empty form (no fields yet).
+  if (raw === null || raw === undefined) return { fields: [], dropped: 0 };
+  // A non-array field_schema is corrupted. Flag it as unparseable so the editor
+  // blocks saving (which would overwrite it with []) until the admin repairs it.
+  if (!Array.isArray(raw)) return { fields: [], dropped: 1 };
   const result = fieldArraySchema.safeParse(raw);
   if (result.success) return { fields: result.data, dropped: 0 };
   // Fall back to per-item parsing so one bad field doesn't blank the form.
@@ -148,11 +152,18 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
 
   // Visual builder is the source of truth. Mirror every change into the
   // Advanced JSON view and clear any stale parse error.
-  const handleFieldsChange = useCallback((next: FieldDefinition[]) => {
-    setFields(next);
-    setFieldJsonDraft(JSON.stringify(next, null, 2));
-    setFieldJsonError(null);
-  }, []);
+  const handleFieldsChange = useCallback(
+    (next: FieldDefinition[]) => {
+      // While unparseable fields remain, the visual builder is locked — applying
+      // its edits here would overwrite the raw JSON draft and strand the
+      // malformed entries the admin still needs to repair.
+      if (unparseableCount > 0) return;
+      setFields(next);
+      setFieldJsonDraft(JSON.stringify(next, null, 2));
+      setFieldJsonError(null);
+    },
+    [unparseableCount],
+  );
 
   // Advanced JSON edits flow back into the builder when they parse against the
   // FieldDefinition contract; otherwise we surface the error and leave the
@@ -371,9 +382,26 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
             Form fields
           </h2>
-          <FieldBuilder value={fields} onChange={handleFieldsChange} />
+          {unparseableCount > 0 ? (
+            <div
+              className="rounded-[8px] border border-error bg-error-light px-4 py-3 text-sm text-error"
+              role="alert"
+            >
+              {unparseableCount} field{unparseableCount === 1 ? "" : "s"} in this
+              form couldn&rsquo;t be parsed and {unparseableCount === 1 ? "is" : "are"}{" "}
+              hidden from the visual builder. The builder is locked until you
+              repair the raw definition in <strong>Advanced: edit as JSON</strong>{" "}
+              below — saving now would permanently delete{" "}
+              {unparseableCount === 1 ? "it" : "them"}.
+            </div>
+          ) : (
+            <FieldBuilder value={fields} onChange={handleFieldsChange} />
+          )}
 
-          <details className="rounded-[8px] border border-border px-3 py-2">
+          <details
+            open={unparseableCount > 0}
+            className="rounded-[8px] border border-border px-3 py-2"
+          >
             <summary className="cursor-pointer text-sm font-medium text-foreground">
               Advanced: edit as JSON
             </summary>

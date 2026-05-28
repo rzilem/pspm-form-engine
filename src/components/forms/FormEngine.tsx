@@ -60,6 +60,10 @@ interface FormEngineProps<T extends FieldValues> {
   formSlug: string;
   defaultValues: DefaultValues<T>;
   confirmationMessage: string;
+  // Per-form reCAPTCHA opt-out. When false, the form skips loading/executing
+  // reCAPTCHA even if NEXT_PUBLIC_RECAPTCHA_SITE_KEY is configured (e.g. private
+  // forms that explicitly set recaptcha_required=false). Defaults to true.
+  recaptcha?: boolean;
   children: (props: {
     errors: FieldErrors<T>;
     register: ReturnType<typeof useForm<T>>["register"];
@@ -74,22 +78,28 @@ function FormEngine<T extends FieldValues>({
   formSlug,
   defaultValues,
   confirmationMessage,
+  recaptcha = true,
   children,
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const honeypotRef = useRef<HTMLInputElement>(null);
 
-  // Lazy-load the reCAPTCHA v3 script only when a site key is configured.
+  // reCAPTCHA is active only when a site key is configured AND this form hasn't
+  // opted out (recaptcha=false). Drives the script load, token fetch, and the
+  // Google disclosure so an opted-out form does none of them.
+  const recaptchaActive = Boolean(RECAPTCHA_SITE_KEY) && recaptcha;
+
+  // Lazy-load the reCAPTCHA v3 script only when reCAPTCHA is active.
   useEffect(() => {
-    if (!RECAPTCHA_SITE_KEY) return;
+    if (!recaptchaActive) return;
     if (document.getElementById("recaptcha-v3")) return;
     const s = document.createElement("script");
     s.id = "recaptcha-v3";
     s.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
     s.async = true;
     document.head.appendChild(s);
-  }, []);
+  }, [recaptchaActive]);
 
   const methods = useForm<T>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -114,7 +124,7 @@ function FormEngine<T extends FieldValues>({
       // without one — the server fails open when no secret is set and the
       // honeypot still guards, so a script hiccup never blocks a real user.
       let recaptchaToken: string | undefined;
-      if (RECAPTCHA_SITE_KEY && typeof window !== "undefined") {
+      if (recaptchaActive && typeof window !== "undefined") {
         try {
           const grecaptcha = await waitForGrecaptcha();
           if (grecaptcha) {
@@ -217,7 +227,7 @@ function FormEngine<T extends FieldValues>({
         </div>
 
         {/* reCAPTCHA disclosure — only shown when reCAPTCHA is actually active. */}
-        {RECAPTCHA_SITE_KEY && (
+        {recaptchaActive && (
           <p className="text-xs text-muted">
             This site is protected by reCAPTCHA and the Google{" "}
             <a

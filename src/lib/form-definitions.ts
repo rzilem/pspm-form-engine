@@ -347,9 +347,20 @@ export function buildSubmissionSchema(
         leaf = leaf.min(1, `${f.label} is required`);
       }
     } else if (f.type !== "consent" && !(f.type === "name" && unconditionallyRequired)) {
-      // Optional at the leaf: explicitly-optional fields AND conditional fields
-      // (enforced only by the superRefine when their condition is met).
-      leaf = leaf.optional();
+      if (isConditional) {
+        // A hidden conditional field still carries its empty default ("" for
+        // text/email/phone/choice, etc.). Coerce empty -> undefined so leaf
+        // constraints (email(), enum, min) don't reject the placeholder before
+        // the superRefine can decide the condition isn't met. The superRefine
+        // (which reads the coerced value) enforces required-when-shown.
+        leaf = z.preprocess(
+          (v) => (v === "" || v === null ? undefined : v),
+          leaf.optional(),
+        );
+      } else {
+        // Explicitly-optional, non-conditional field.
+        leaf = leaf.optional();
+      }
     }
 
     // Conditional fields: when `conditionalOn` is set the field is optional
