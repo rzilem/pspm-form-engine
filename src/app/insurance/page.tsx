@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   FormProvider,
   useForm,
@@ -24,6 +24,7 @@ import {
   type InsuranceFormData,
 } from "@/lib/schemas-insurance";
 import type { FieldDef } from "@/lib/field-map-insurance";
+import { loadRecaptchaScript, getRecaptchaToken } from "@/lib/recaptcha-client";
 
 const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api/submit`
@@ -253,13 +254,21 @@ export default function InsuranceFormPage() {
     setStepIndex((i) => Math.max(i - 1, 0));
   }, []);
 
+  // This legacy form posts to /api/submit directly (it doesn't use FormEngine),
+  // so it must load + send its own reCAPTCHA token — otherwise it would 403 when
+  // a secret is configured (the server requires a token for legacy slugs).
+  useEffect(() => {
+    loadRecaptchaScript();
+  }, []);
+
   async function onSubmit(data: InsuranceFormData) {
     setSubmitError(null);
     try {
+      const recaptchaToken = await getRecaptchaToken("insurance");
       const response = await fetch(SUBMIT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formSlug: "insurance", data }),
+        body: JSON.stringify({ formSlug: "insurance", data, recaptchaToken }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };

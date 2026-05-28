@@ -106,13 +106,20 @@ function makeFieldId(label: string, taken: ReadonlySet<string>): string {
 export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
   const updateField = useCallback(
     (index: number, patch: Partial<FieldDefinition>) => {
+      const prev = value[index];
       const next = value.map((f, i) => (i === index ? { ...f, ...patch } : f));
       const updated = next[index];
       // Only scalar fields can be triggers (the resolver compares String(value)).
-      // If this field changed to a non-scalar type (section break, composite,
-      // array, signature, consent), drop conditional logic in fields that
-      // pointed at it — a dangling trigger would hide/wrongly-show dependents.
-      if (updated && !TRIGGER_FIELD_TYPES.has(updated.type)) {
+      // If this edit ACTUALLY changes the type from a trigger-capable one to a
+      // non-scalar one, drop conditional logic in fields that pointed at it.
+      // Gate on a real type change so a harmless label/help edit (or a JSON-
+      // authored condition on a non-scalar trigger) isn't silently wiped.
+      const becameNonTrigger =
+        patch.type !== undefined &&
+        patch.type !== prev?.type &&
+        !TRIGGER_FIELD_TYPES.has(patch.type) &&
+        TRIGGER_FIELD_TYPES.has(prev?.type as FieldType);
+      if (updated && becameNonTrigger) {
         const id = updated.id;
         onChange(
           next.map((f, i) =>

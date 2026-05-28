@@ -12,6 +12,11 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
 import { Button } from "@/components/ui/Button";
+import {
+  RECAPTCHA_SITE_KEY,
+  loadRecaptchaScript,
+  getRecaptchaToken,
+} from "@/lib/recaptcha-client";
 
 const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api/submit`
@@ -22,38 +27,7 @@ const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
 // on submit and the server enforces it. When unset, the form submits without
 // a token and the server fails open — the honeypot below is the always-on
 // spam guard. This makes reCAPTCHA a progressive enhancement, not a fake badge.
-const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY ?? "";
-
-declare global {
-  interface Window {
-    grecaptcha?: {
-      ready: (cb: () => void) => void;
-      execute: (siteKey: string, opts: { action: string }) => Promise<string>;
-    };
-  }
-}
-
-type Grecaptcha = NonNullable<Window["grecaptcha"]>;
-
-// The reCAPTCHA script loads asynchronously, so window.grecaptcha may not exist
-// yet when a fast user submits. Poll briefly for it instead of silently sending
-// no token — otherwise the server rejects recaptcha-required forms with a 403.
-function waitForGrecaptcha(timeoutMs = 8000): Promise<Grecaptcha | undefined> {
-  if (typeof window === "undefined") return Promise.resolve(undefined);
-  if (window.grecaptcha) return Promise.resolve(window.grecaptcha);
-  return new Promise((resolve) => {
-    const start = Date.now();
-    const id = window.setInterval(() => {
-      if (window.grecaptcha) {
-        window.clearInterval(id);
-        resolve(window.grecaptcha);
-      } else if (Date.now() - start > timeoutMs) {
-        window.clearInterval(id);
-        resolve(undefined);
-      }
-    }, 100);
-  });
-}
+// Shared script-load + token-fetch live in lib/recaptcha-client.
 
 interface FormEngineProps<T extends FieldValues> {
   schema: z.ZodType<T>;
@@ -92,13 +66,7 @@ function FormEngine<T extends FieldValues>({
 
   // Lazy-load the reCAPTCHA v3 script only when reCAPTCHA is active.
   useEffect(() => {
-    if (!recaptchaActive) return;
-    if (document.getElementById("recaptcha-v3")) return;
-    const s = document.createElement("script");
-    s.id = "recaptcha-v3";
-    s.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
-    s.async = true;
-    document.head.appendChild(s);
+    if (recaptchaActive) loadRecaptchaScript();
   }, [recaptchaActive]);
 
   const methods = useForm<T>({
@@ -120,27 +88,12 @@ function FormEngine<T extends FieldValues>({
   async function onSubmit(data: T) {
     setSubmitError(null);
     try {
-      // Fetch a reCAPTCHA v3 token when configured. On any failure, submit
-      // without one — the server fails open when no secret is set and the
-      // honeypot still guards, so a script hiccup never blocks a real user.
-      let recaptchaToken: string | undefined;
-      if (recaptchaActive && typeof window !== "undefined") {
-        try {
-          const grecaptcha = await waitForGrecaptcha();
-          if (grecaptcha) {
-            recaptchaToken = await new Promise<string>((resolve, reject) => {
-              grecaptcha.ready(() => {
-                grecaptcha
-                  .execute(RECAPTCHA_SITE_KEY, { action: "submit" })
-                  .then(resolve)
-                  .catch(reject);
-              });
-            });
-          }
-        } catch {
-          recaptchaToken = undefined;
-        }
-      }
+      // Fetch a reCAPTCHA v3 token when active. On any failure, submit without
+      // one — the server fails open when no secret is set and the honeypot
+      // still guards, so a script hiccup never blocks a real user.
+      const recaptchaToken = recaptchaActive
+        ? await getRecaptchaToken("submit")
+        : undefined;
 
       const hp = honeypotRef.current?.value ?? "";
 
