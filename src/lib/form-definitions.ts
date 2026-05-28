@@ -223,6 +223,14 @@ export function buildSubmissionSchema(
 
     let leaf: z.ZodTypeAny;
 
+    // A field with conditional logic must be submittable while it is hidden
+    // (its condition not met), so it is NEVER unconditionally required at the
+    // leaf level — the superRefine pass below enforces required-when-the-
+    // condition-is-met. Only non-conditional required fields get a hard leaf
+    // constraint.
+    const isConditional = Boolean(f.conditionalOn);
+    const unconditionallyRequired = Boolean(f.required) && !isConditional;
+
     switch (f.type) {
       case "email":
         leaf = z.string().email("Please enter a valid email address");
@@ -261,8 +269,10 @@ export function buildSubmissionSchema(
           );
         break;
       case "consent":
-        // Consent must be checked (true) when required; ignored otherwise.
-        leaf = f.required
+        // Consent must be checked (true) when unconditionally required;
+        // optional otherwise (a conditional consent is enforced by the
+        // superRefine only when its condition is met).
+        leaf = unconditionallyRequired
           ? z.literal(true, { message: "You must agree to continue" })
           : z.boolean().optional();
         break;
@@ -271,7 +281,7 @@ export function buildSubmissionSchema(
           first: z.string().max(100),
           last: z.string().max(100),
         });
-        if (f.required) {
+        if (unconditionallyRequired) {
           leaf = (leaf as z.ZodObject<z.ZodRawShape>).refine(
             (v: { first?: string; last?: string }) =>
               Boolean(v?.first?.trim()) && Boolean(v?.last?.trim()),
@@ -323,7 +333,7 @@ export function buildSubmissionSchema(
     // Required gating. For string-ish leaves we treat empty string as missing
     // so that `required: false` doesn't reject blank fields. file_upload
     // (array) and signature (string) need their own required predicates.
-    if (f.required && f.type !== "consent" && f.type !== "name") {
+    if (unconditionallyRequired && f.type !== "consent" && f.type !== "name") {
       if (f.type === "file_upload") {
         leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
           1,
@@ -336,7 +346,9 @@ export function buildSubmissionSchema(
       } else if (leaf instanceof z.ZodString) {
         leaf = leaf.min(1, `${f.label} is required`);
       }
-    } else if (!f.required && f.type !== "consent") {
+    } else if (f.type !== "consent" && !(f.type === "name" && unconditionallyRequired)) {
+      // Optional at the leaf: explicitly-optional fields AND conditional fields
+      // (enforced only by the superRefine when their condition is met).
       leaf = leaf.optional();
     }
 
@@ -365,11 +377,19 @@ export function buildSubmissionSchema(
             : String(trigger ?? "") === f.conditionalOn.equals;
           if (!matches) continue;
           const value = data[f.id];
-          const missing =
-            value === undefined ||
-            value === null ||
-            (typeof value === "string" && value.trim() === "") ||
-            (Array.isArray(value) && value.length === 0);
+          let missing: boolean;
+          if (f.type === "consent") {
+            missing = value !== true;
+          } else if (f.type === "name") {
+            const v = value as { first?: string; last?: string } | undefined;
+            missing = !v || !v.first?.trim() || !v.last?.trim();
+          } else {
+            missing =
+              value === undefined ||
+              value === null ||
+              (typeof value === "string" && value.trim() === "") ||
+              (Array.isArray(value) && value.length === 0);
+          }
           if (missing) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,

@@ -33,6 +33,28 @@ declare global {
   }
 }
 
+type Grecaptcha = NonNullable<Window["grecaptcha"]>;
+
+// The reCAPTCHA script loads asynchronously, so window.grecaptcha may not exist
+// yet when a fast user submits. Poll briefly for it instead of silently sending
+// no token — otherwise the server rejects recaptcha-required forms with a 403.
+function waitForGrecaptcha(timeoutMs = 8000): Promise<Grecaptcha | undefined> {
+  if (typeof window === "undefined") return Promise.resolve(undefined);
+  if (window.grecaptcha) return Promise.resolve(window.grecaptcha);
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const id = window.setInterval(() => {
+      if (window.grecaptcha) {
+        window.clearInterval(id);
+        resolve(window.grecaptcha);
+      } else if (Date.now() - start > timeoutMs) {
+        window.clearInterval(id);
+        resolve(undefined);
+      }
+    }, 100);
+  });
+}
+
 interface FormEngineProps<T extends FieldValues> {
   schema: z.ZodType<T>;
   formSlug: string;
@@ -92,17 +114,19 @@ function FormEngine<T extends FieldValues>({
       // without one — the server fails open when no secret is set and the
       // honeypot still guards, so a script hiccup never blocks a real user.
       let recaptchaToken: string | undefined;
-      if (RECAPTCHA_SITE_KEY && typeof window !== "undefined" && window.grecaptcha) {
+      if (RECAPTCHA_SITE_KEY && typeof window !== "undefined") {
         try {
-          const grecaptcha = window.grecaptcha;
-          recaptchaToken = await new Promise<string>((resolve, reject) => {
-            grecaptcha.ready(() => {
-              grecaptcha
-                .execute(RECAPTCHA_SITE_KEY, { action: "submit" })
-                .then(resolve)
-                .catch(reject);
+          const grecaptcha = await waitForGrecaptcha();
+          if (grecaptcha) {
+            recaptchaToken = await new Promise<string>((resolve, reject) => {
+              grecaptcha.ready(() => {
+                grecaptcha
+                  .execute(RECAPTCHA_SITE_KEY, { action: "submit" })
+                  .then(resolve)
+                  .catch(reject);
+              });
             });
-          });
+          }
         } catch {
           recaptchaToken = undefined;
         }

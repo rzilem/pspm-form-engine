@@ -22,17 +22,21 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 // throwing, so a partially-malformed row still loads into the builder.
 const fieldArraySchema = z.array(fieldDefinitionSchema);
 
-function parseFieldSchema(raw: unknown): FieldDefinition[] {
-  if (!Array.isArray(raw)) return [];
+function parseFieldSchema(raw: unknown): { fields: FieldDefinition[]; dropped: number } {
+  if (!Array.isArray(raw)) return { fields: [], dropped: 0 };
   const result = fieldArraySchema.safeParse(raw);
-  if (result.success) return result.data;
+  if (result.success) return { fields: result.data, dropped: 0 };
   // Fall back to per-item parsing so one bad field doesn't blank the form.
+  // Count the entries we couldn't parse so the editor can block saving (which
+  // would otherwise permanently drop them) until they're repaired.
   const out: FieldDefinition[] = [];
+  let dropped = 0;
   for (const item of raw) {
     const parsed = fieldDefinitionSchema.safeParse(item);
     if (parsed.success) out.push(parsed.data);
+    else dropped++;
   }
-  return out;
+  return { fields: out, dropped };
 }
 
 interface FormDefinitionRow {
@@ -76,6 +80,11 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [fields, setFields] = useState<FieldDefinition[]>([]);
   const [fieldJsonDraft, setFieldJsonDraft] = useState("[]");
   const [fieldJsonError, setFieldJsonError] = useState<string | null>(null);
+  // Count of field_schema entries that failed to parse on load. They are hidden
+  // from the visual builder, so saving would silently delete them — this sticky
+  // signal blocks the save until a fully-valid Advanced JSON edit clears it.
+  // (Unlike fieldJsonError, the visual builder never resets this.)
+  const [unparseableCount, setUnparseableCount] = useState(0);
   const [notificationConfigJson, setNotificationConfigJson] = useState('{"rules":[]}');
   const [pdfEnabled, setPdfEnabled] = useState(false);
   const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
@@ -103,10 +112,20 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       setStatus(data.status);
       setConfirmationMessage(data.confirmation_message);
       setRecaptchaRequired(data.recaptcha_required);
-      const loadedFields = parseFieldSchema(data.field_schema);
+      const { fields: loadedFields, dropped } = parseFieldSchema(data.field_schema);
       setFields(loadedFields);
-      setFieldJsonDraft(JSON.stringify(loadedFields, null, 2));
-      setFieldJsonError(null);
+      setUnparseableCount(dropped);
+      if (dropped > 0) {
+        // Surface the RAW schema (malformed entries included) in Advanced JSON
+        // so the admin can repair them; the save is blocked until they do.
+        setFieldJsonDraft(JSON.stringify(data.field_schema, null, 2));
+        setFieldJsonError(
+          `${dropped} field${dropped === 1 ? "" : "s"} could not be parsed and ${dropped === 1 ? "is" : "are"} hidden from the visual builder. Fix ${dropped === 1 ? "it" : "them"} in the Advanced JSON below before saving — saving now would delete ${dropped === 1 ? "it" : "them"}.`,
+        );
+      } else {
+        setFieldJsonDraft(JSON.stringify(loadedFields, null, 2));
+        setFieldJsonError(null);
+      }
       setNotificationConfigJson(
         JSON.stringify(data.notification_config ?? { rules: [] }, null, 2),
       );
@@ -156,6 +175,9 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
     }
     setFieldJsonError(null);
     setFields(result.data);
+    // A fully-valid array means every field now conforms — the previously
+    // unparseable entries (if any) have been repaired, so clear the block.
+    setUnparseableCount(0);
   }, []);
 
   async function handleSave(targetStatus?: "draft" | "published" | "archived") {
@@ -166,6 +188,12 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       // The visual FieldBuilder is the source of truth for fields. If the
       // Advanced JSON view has an unresolved parse error, block the save so
       // we don't silently persist stale field state.
+      if (unparseableCount > 0) {
+        setValidationError(
+          `${unparseableCount} field${unparseableCount === 1 ? "" : "s"} could not be parsed and ${unparseableCount === 1 ? "is" : "are"} hidden from the visual builder. Open the Advanced JSON section below and fix ${unparseableCount === 1 ? "it" : "them"} before saving — saving now would permanently delete ${unparseableCount === 1 ? "it" : "them"}.`,
+        );
+        return;
+      }
       if (fieldJsonError) {
         setValidationError(
           "Field schema (Advanced JSON) is not valid JSON. Fix it or collapse the Advanced section to use the visual builder.",
