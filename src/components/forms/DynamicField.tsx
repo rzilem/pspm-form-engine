@@ -235,12 +235,33 @@ export function DynamicField({ field, formSlug }: DynamicFieldProps) {
             </span>
           )}
         </legend>
-        <TextInput label="Street" {...register(`${field.id}.street`)} />
+        <TextInput
+          label="Street"
+          required={field.required}
+          {...register(`${field.id}.street`)}
+        />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <TextInput label="City" {...register(`${field.id}.city`)} />
-          <TextInput label="State" {...register(`${field.id}.state`)} />
-          <TextInput label="ZIP" {...register(`${field.id}.zip`)} />
+          <TextInput
+            label="City"
+            required={field.required}
+            {...register(`${field.id}.city`)}
+          />
+          <TextInput
+            label="State"
+            required={field.required}
+            {...register(`${field.id}.state`)}
+          />
+          <TextInput
+            label="ZIP"
+            required={field.required}
+            {...register(`${field.id}.zip`)}
+          />
         </div>
+        {error && (
+          <p className="text-xs text-error" role="alert">
+            {error.message}
+          </p>
+        )}
       </fieldset>
     );
   }

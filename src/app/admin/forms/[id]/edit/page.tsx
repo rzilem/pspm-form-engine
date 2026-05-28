@@ -89,6 +89,10 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   // signal blocks the save until a fully-valid Advanced JSON edit clears it.
   // (Unlike fieldJsonError, the visual builder never resets this.)
   const [unparseableCount, setUnparseableCount] = useState(0);
+  // Tracks the Advanced JSON <details> open state. Controlled via state (not
+  // bound to a derived value) so a re-render while the admin is typing doesn't
+  // snap it shut.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [notificationConfigJson, setNotificationConfigJson] = useState('{"rules":[]}');
   const [pdfEnabled, setPdfEnabled] = useState(false);
   const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
@@ -119,6 +123,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       const { fields: loadedFields, dropped } = parseFieldSchema(data.field_schema);
       setFields(loadedFields);
       setUnparseableCount(dropped);
+      setAdvancedOpen(dropped > 0);
       if (dropped > 0) {
         // Surface the RAW schema (malformed entries included) in Advanced JSON
         // so the admin can repair them; the save is blocked until they do.
@@ -197,7 +202,9 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   // must persist until the admin fixes it.
   const handleAdvancedToggle = useCallback(
     (e: React.SyntheticEvent<HTMLDetailsElement>) => {
-      if (e.currentTarget.open) return;
+      const open = e.currentTarget.open;
+      setAdvancedOpen(open);
+      if (open) return;
       if (unparseableCount > 0) return;
       if (fieldJsonError) {
         setFieldJsonDraft(JSON.stringify(fields, null, 2));
@@ -415,7 +422,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           )}
 
           <details
-            open={unparseableCount > 0}
+            open={advancedOpen}
             onToggle={handleAdvancedToggle}
             className="rounded-[8px] border border-border px-3 py-2"
           >

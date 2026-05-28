@@ -241,15 +241,16 @@ export function buildSubmissionSchema(
       case "phone":
         leaf = z.string().min(7).max(40);
         break;
-      case "number":
-        leaf = z.coerce.number();
-        if (f.validation?.min !== undefined) {
-          leaf = (leaf as z.ZodNumber).min(f.validation.min);
-        }
-        if (f.validation?.max !== undefined) {
-          leaf = (leaf as z.ZodNumber).max(f.validation.max);
-        }
+      case "number": {
+        let num = z.coerce.number();
+        if (f.validation?.min !== undefined) num = num.min(f.validation.min);
+        if (f.validation?.max !== undefined) num = num.max(f.validation.max);
+        // Map ""/null -> undefined BEFORE coercion so a blank value doesn't
+        // become 0. A required number then rejects undefined (NaN); an optional
+        // one accepts it via the .optional() applied in the gating block below.
+        leaf = z.preprocess((v) => (v === "" || v === null ? undefined : v), num);
         break;
+      }
       case "checkbox_group":
         leaf = z.array(z.string());
         break;
@@ -396,19 +397,48 @@ export function buildSubmissionSchema(
 
   let obj = z.object(shape) as unknown as z.ZodType<Record<string, unknown>>;
 
-  // Validate each conditional field with its own "present" leaf, but only when
-  // its trigger condition is met. When it isn't, the field is hidden and its
-  // value (which RHF keeps after the field unmounts) is ignored entirely.
   if (conditionalLeaves.length > 0) {
-    obj = (obj as unknown as z.ZodObject<z.ZodRawShape>).superRefine(
-      (data: Record<string, unknown>, ctx: z.RefinementCtx) => {
+    const fieldsById = new Map(fields.map((f) => [f.id, f]));
+
+    // A field is visible only if it isn't gated, OR its trigger is itself
+    // visible AND the trigger's value matches. Resolving visibility
+    // transitively means a field gated on a hidden field is also hidden (so a
+    // stale value RHF kept on the hidden ancestor can't reactivate a branch).
+    // Memoized per parse; the provisional `false` guards against cycles.
+    function isVisible(
+      fieldId: string,
+      data: Record<string, unknown>,
+      cache: Map<string, boolean>,
+    ): boolean {
+      const cached = cache.get(fieldId);
+      if (cached !== undefined) return cached;
+      const f = fieldsById.get(fieldId);
+      if (!f) return true; // unknown id → no gating
+      if (!f.conditionalOn) {
+        cache.set(fieldId, true);
+        return true;
+      }
+      cache.set(fieldId, false);
+      const triggerId = f.conditionalOn.fieldId;
+      let vis = false;
+      if (triggerId && isVisible(triggerId, data, cache)) {
+        const tv = data[triggerId];
+        vis = Array.isArray(f.conditionalOn.equals)
+          ? f.conditionalOn.equals.includes(String(tv ?? ""))
+          : String(tv ?? "") === f.conditionalOn.equals;
+      }
+      cache.set(fieldId, vis);
+      return vis;
+    }
+
+    // Validate each conditional field with its own "present" leaf, but only
+    // when it is genuinely visible. A hidden field's value (which RHF keeps
+    // after the field unmounts) is neither validated nor stored.
+    obj = (obj as unknown as z.ZodObject<z.ZodRawShape>)
+      .superRefine((data: Record<string, unknown>, ctx: z.RefinementCtx) => {
+        const cache = new Map<string, boolean>();
         for (const { field: f, leaf } of conditionalLeaves) {
-          if (!f.conditionalOn) continue;
-          const trigger = data[f.conditionalOn.fieldId];
-          const matches = Array.isArray(f.conditionalOn.equals)
-            ? f.conditionalOn.equals.includes(String(trigger ?? ""))
-            : String(trigger ?? "") === f.conditionalOn.equals;
-          if (!matches) continue;
+          if (!isVisible(f.id, data, cache)) continue;
           const result = leaf.safeParse(data[f.id]);
           if (!result.success) {
             for (const issue of result.error.issues) {
@@ -416,8 +446,17 @@ export function buildSubmissionSchema(
             }
           }
         }
-      },
-    ) as unknown as z.ZodType<Record<string, unknown>>;
+      })
+      // Strip hidden conditional values from the parsed output so they are
+      // never persisted, emailed, or rendered in the generated PDF.
+      .transform((data: Record<string, unknown>) => {
+        const cache = new Map<string, boolean>();
+        const out: Record<string, unknown> = { ...data };
+        for (const { field: f } of conditionalLeaves) {
+          if (!isVisible(f.id, data, cache)) delete out[f.id];
+        }
+        return out;
+      }) as unknown as z.ZodType<Record<string, unknown>>;
   }
 
   return obj;
