@@ -628,6 +628,19 @@ export interface Database {
         };
         Returns: string;
       };
+      survey_apply_transition: {
+        Args: {
+          p_survey_id: string;
+          p_expected_epoch: number;
+          p_next_active_id: string | null;
+          p_active_open: boolean;
+          p_next_status: string;
+          p_target_id: string | null;
+          p_target_state: string | null;
+          p_close_others: boolean;
+        };
+        Returns: unknown;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

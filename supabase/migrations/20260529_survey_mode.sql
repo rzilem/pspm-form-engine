@@ -319,3 +319,78 @@ $$;
 
 REVOKE ALL ON FUNCTION public.submit_survey_response(UUID, UUID, JSONB, TEXT, BIGINT, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.submit_survey_response(UUID, UUID, JSONB, TEXT, BIGINT, TEXT, TEXT) TO service_role;
+
+-- ── Atomic presenter transition ──────────────────────────────────────────────
+-- Does the survey-row CAS AND the question-state writes in ONE transaction so a
+-- concurrent status change (e.g. End poll) can't interleave and leave the survey
+-- 'closed' while a question is still 'open'. The route resolves WHICH question +
+-- target state in TS and passes them in; this function just applies them
+-- atomically. The CAS UPDATE locks the survey row until commit, so any racing
+-- transition/status update serializes behind it. Returns {ok:true,...} or
+-- {ok:false,conflict:true}. service_role only (called via the server route).
+CREATE OR REPLACE FUNCTION public.survey_apply_transition(
+  p_survey_id      UUID,
+  p_expected_epoch BIGINT,
+  p_next_active_id UUID,
+  p_active_open    BOOLEAN,
+  p_next_status    TEXT,
+  p_target_id      UUID,
+  p_target_state   TEXT,
+  p_close_others   BOOLEAN
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  n INTEGER;
+BEGIN
+  -- CAS: only one action with this expected epoch wins; holds the row lock.
+  UPDATE surveys
+  SET state_epoch = p_expected_epoch + 1,
+      active_question_id = p_next_active_id,
+      active_question_open = p_active_open,
+      status = p_next_status,
+      updated_at = now()
+  WHERE id = p_survey_id
+    AND state_epoch = p_expected_epoch;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n = 0 THEN
+    RETURN jsonb_build_object('ok', false, 'conflict', true);
+  END IF;
+
+  -- Close any other open question (so uniq_sq_one_open is never violated).
+  IF p_close_others THEN
+    UPDATE survey_questions
+    SET state = 'closed', closed_at = now()
+    WHERE survey_id = p_survey_id
+      AND state = 'open'
+      AND (p_target_id IS NULL OR id <> p_target_id);
+  END IF;
+
+  -- Apply the target question's new state.
+  IF p_target_id IS NOT NULL AND p_target_state IS NOT NULL THEN
+    UPDATE survey_questions
+    SET state = p_target_state,
+        opened_at = CASE WHEN p_target_state = 'open' THEN now()
+                         WHEN p_target_state = 'pending' THEN NULL
+                         ELSE opened_at END,
+        closed_at = CASE WHEN p_target_state = 'closed' THEN now()
+                         WHEN p_target_state = 'pending' THEN NULL
+                         ELSE closed_at END
+    WHERE id = p_target_id AND survey_id = p_survey_id;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'state_epoch', p_expected_epoch + 1,
+    'status', p_next_status,
+    'active_question_id', p_next_active_id,
+    'active_question_open', p_active_open
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.survey_apply_transition(UUID, BIGINT, UUID, BOOLEAN, TEXT, UUID, TEXT, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.survey_apply_transition(UUID, BIGINT, UUID, BOOLEAN, TEXT, UUID, TEXT, BOOLEAN) TO service_role;

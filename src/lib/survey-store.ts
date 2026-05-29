@@ -110,6 +110,11 @@ function normalizeQuestionConfig(q: CreateQuestionInput): { config: Record<strin
   if (!parsed.success) {
     return { config: {}, error: parsed.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`).join("; ") };
   }
+  // Inverted numeric ranges parse fine individually but produce an unusable
+  // question (empty UI range, min(hi).max(lo) validator that rejects everything).
+  if (parsed.data.type === "rating_scale" && parsed.data.min > parsed.data.max) {
+    return { config: {}, error: "min must be less than or equal to max" };
+  }
   return { config: parsed.data as unknown as Record<string, unknown> };
 }
 
@@ -492,27 +497,34 @@ export async function presenterAction(opts: {
   // window between the survey CAS and the survey_questions.state write below).
   const nextActiveOpen = newState === "open";
 
-  // 1. CAS the survey first. Only one concurrent action with this expected_epoch
-  //    wins the bump; the loser never touches question state.
-  const { data: casRow, error: casErr } = await supabase
-    .from("surveys")
-    .update({
-      state_epoch: opts.expectedEpoch + 1,
-      active_question_id: nextActiveId,
-      active_question_open: nextActiveOpen,
-      status: nextStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", opts.surveyId)
-    .eq("state_epoch", opts.expectedEpoch)
-    .select("id, state_epoch, status, active_question_id, active_question_open")
-    .maybeSingle();
+  // Apply the survey CAS AND the question-state writes in ONE transaction (RPC),
+  // so a concurrent status change (End poll) can't interleave between the CAS and
+  // the question write and leave the survey closed with a question still open.
+  const { data: rpcRaw, error: rpcErr } = await supabase.rpc("survey_apply_transition", {
+    p_survey_id: opts.surveyId,
+    p_expected_epoch: opts.expectedEpoch,
+    p_next_active_id: nextActiveId,
+    p_active_open: nextActiveOpen,
+    p_next_status: nextStatus,
+    p_target_id: targetId,
+    p_target_state: newState,
+    p_close_others: closeOthers,
+  });
 
-  if (casErr) {
-    logger.error("presenterAction CAS failed", { error: casErr.message });
+  if (rpcErr) {
+    logger.error("survey_apply_transition rpc failed", { error: rpcErr.message });
     return { ok: false, status: 500, body: { error: "Presenter update failed" } };
   }
-  if (!casRow) {
+
+  const result = (rpcRaw ?? {}) as {
+    ok?: boolean;
+    conflict?: boolean;
+    state_epoch?: number;
+    status?: string;
+    active_question_id?: string | null;
+  };
+
+  if (!result.ok) {
     // Lost the race (or stale epoch). Return the authoritative current state.
     const fresh = await getSurveyById(opts.surveyId);
     return {
@@ -527,45 +539,14 @@ export async function presenterAction(opts: {
     };
   }
 
-  // 2. CAS won → mutate question state. Close other open questions first so the
-  //    uniq_sq_one_open index is never violated when opening a new one.
-  if (closeOthers) {
-    const { error: closeErr } = await supabase
-      .from("survey_questions")
-      .update({ state: "closed", closed_at: new Date().toISOString() })
-      .eq("survey_id", opts.surveyId)
-      .eq("state", "open")
-      .neq("id", targetId as string);
-    if (closeErr) {
-      logger.error("presenterAction close-others failed", { error: closeErr.message });
-    }
-  }
-
-  if (targetId && newState) {
-    const patch: Record<string, unknown> = { state: newState };
-    if (newState === "open") patch.opened_at = new Date().toISOString();
-    if (newState === "closed") patch.closed_at = new Date().toISOString();
-    if (newState === "pending") {
-      patch.opened_at = null;
-      patch.closed_at = null;
-    }
-    const { error: stateErr } = await supabase
-      .from("survey_questions")
-      .update(patch)
-      .eq("id", targetId);
-    if (stateErr) {
-      logger.error("presenterAction question-state update failed", { error: stateErr.message });
-    }
-  }
-
   return {
     ok: true,
     status: 200,
     body: {
       ok: true,
-      state_epoch: casRow.state_epoch,
-      status: casRow.status,
-      active_question_id: casRow.active_question_id,
+      state_epoch: result.state_epoch,
+      status: result.status,
+      active_question_id: result.active_question_id ?? null,
     },
   };
 }
