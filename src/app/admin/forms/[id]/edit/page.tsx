@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, useMemo, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { FormLayout } from "@/components/forms/FormLayout";
 import { Button } from "@/components/ui/Button";
 import { TextInput } from "@/components/ui/TextInput";
 import { TextArea } from "@/components/ui/TextArea";
 import { SelectField } from "@/components/ui/SelectField";
 import { FieldBuilder } from "@/components/admin/FieldBuilder";
+import { DynamicForm } from "@/app/forms/[slug]/DynamicForm";
 import {
   fieldDefinitionSchema,
   type FieldDefinition,
+  type FormDefinition,
 } from "@/lib/form-definitions";
 import { z } from "zod";
 
@@ -55,6 +56,7 @@ interface FormDefinitionRow {
   workflow_config: unknown;
   confirmation_message: string;
   recaptcha_required: boolean;
+  width?: "full" | "boxed" | null;
   published_at: string | null;
 }
 
@@ -81,6 +83,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [status, setStatus] = useState<"draft" | "published" | "archived">("draft");
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const [recaptchaRequired, setRecaptchaRequired] = useState(true);
+  const [width, setWidth] = useState<"full" | "boxed">("full");
   const [fields, setFields] = useState<FieldDefinition[]>([]);
   const [fieldJsonDraft, setFieldJsonDraft] = useState("[]");
   const [fieldJsonError, setFieldJsonError] = useState<string | null>(null);
@@ -98,6 +101,9 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
   const [workflowEnabled, setWorkflowEnabled] = useState(false);
   const [workflowStepsJson, setWorkflowStepsJson] = useState("[]");
+  // Preview-only viewport toggle (does NOT persist — `width` above is the
+  // saved setting; this just simulates a phone in the preview pane).
+  const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -120,6 +126,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       setStatus(data.status);
       setConfirmationMessage(data.confirmation_message);
       setRecaptchaRequired(data.recaptcha_required);
+      setWidth(data.width === "boxed" ? "boxed" : "full");
       const { fields: loadedFields, dropped } = parseFieldSchema(data.field_schema);
       setFields(loadedFields);
       setUnparseableCount(dropped);
@@ -263,6 +270,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           status: targetStatus ?? status,
           confirmation_message: confirmationMessage,
           recaptcha_required: recaptchaRequired,
+          width,
           field_schema: fields,
           notification_config: notificationConfig,
           pdf_config: {
@@ -306,250 +314,399 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
     }
   }
 
+  // Build a FormDefinition-shaped object from the in-progress editor state so
+  // the right pane renders the REAL form (DynamicForm) exactly as end users
+  // will see it. Re-keyed below so adding/removing/retyping a field remounts
+  // the preview form and re-registers react-hook-form fields.
+  const previewDefinition = useMemo<FormDefinition>(
+    () => ({
+      id: definition?.id ?? "preview",
+      slug: definition?.slug ?? "preview",
+      title,
+      description: description.trim() || null,
+      status: "published",
+      field_schema: fields,
+      notification_config: { rules: [] },
+      pdf_config: { enabled: false, template: "default" },
+      workflow_config: { enabled: false, steps: [] },
+      confirmation_message: confirmationMessage || "Submitted.",
+      recaptcha_required: false,
+      width,
+      created_by: null,
+      created_at: "",
+      updated_at: "",
+      published_at: null,
+    }),
+    [definition?.id, definition?.slug, title, description, fields, confirmationMessage, width],
+  );
+  // Remount the preview when the field SET changes (ids/types) so RHF picks up
+  // new fields; label/help/option edits update live without a remount.
+  const previewKey = useMemo(
+    () => fields.map((f) => `${f.id}:${f.type}`).join("|"),
+    [fields],
+  );
+
   if (loadError) {
     return (
-      <FormLayout title="Edit form" subtitle={loadError}>
-        <Link href="/admin/forms" className="text-primary text-sm">
-          ← Back to forms
-        </Link>
-      </FormLayout>
+      <div className="min-h-screen grid place-items-center bg-gray-50 p-6">
+        <div className="text-center">
+          <p className="text-sm text-error mb-3">{loadError}</p>
+          <Link href="/admin/forms" className="text-primary text-sm">
+            ← Back to forms
+          </Link>
+        </div>
+      </div>
     );
   }
 
   if (!definition) {
-    return <FormLayout title="Edit form"><p className="text-sm text-muted">Loading…</p></FormLayout>;
+    return (
+      <div className="min-h-screen grid place-items-center bg-gray-50">
+        <p className="text-sm text-muted">Loading…</p>
+      </div>
+    );
   }
 
+  const statusPill =
+    status === "published"
+      ? "bg-brand-green-light text-brand-green-dark"
+      : status === "archived"
+        ? "bg-gray-100 text-gray-500"
+        : "bg-yellow-100 text-yellow-800";
+
+  // Preview container width: a phone frame when "mobile", otherwise it follows
+  // the form's saved width setting — exactly how it renders embedded vs boxed.
+  const previewFrame =
+    previewDevice === "mobile"
+      ? "max-w-[390px] mx-auto"
+      : width === "boxed"
+        ? "max-w-2xl mx-auto"
+        : "w-full";
+
   return (
-    <FormLayout title={`Edit: ${title || definition.slug}`} subtitle={`/forms/${definition.slug}`}>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <Link href="/admin/forms" className="text-primary text-sm">
-          ← Back to forms
-        </Link>
-        <div className="flex items-center gap-2">
-          {definition.status === "published" && (
-            <Link
-              href={`/forms/${definition.slug}`}
-              target="_blank"
-              className="text-sm text-muted hover:text-primary no-underline"
-            >
-              Preview ↗
+    <div className="min-h-screen flex flex-col bg-gray-50">
+      {/* Sticky toolbar */}
+      <header className="sticky top-0 z-30 bg-white border-b border-border">
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-navy to-brand-green" />
+        <div className="px-4 sm:px-5 h-16 flex items-center gap-3">
+          <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-br from-primary to-navy grid place-items-center text-white font-bold text-sm">
+            PS
+          </div>
+          <div className="flex items-center gap-2 text-sm min-w-0">
+            <Link href="/admin/forms" className="text-muted hover:text-primary no-underline hidden sm:inline">
+              Forms
             </Link>
-          )}
-          {saveStatus && <span className="text-xs text-brand-green">{saveStatus}</span>}
+            <span className="text-border hidden sm:inline">/</span>
+            <span className="font-semibold text-foreground truncate">{title || definition.slug}</span>
+            <span className={`shrink-0 text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${statusPill}`}>
+              {status}
+            </span>
+          </div>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            {saveStatus && <span className="text-xs text-brand-green hidden sm:inline">{saveStatus}</span>}
+            {definition.status === "published" && (
+              <Link
+                href={`/forms/${definition.slug}`}
+                target="_blank"
+                className="text-sm text-muted hover:text-primary no-underline hidden md:inline"
+              >
+                Open ↗
+              </Link>
+            )}
+            <Button size="sm" variant="outline" onClick={() => handleSave()} loading={saving}>
+              Save
+            </Button>
+            {definition.status !== "published" ? (
+              <Button size="sm" onClick={() => handleSave("published")} loading={saving}>
+                Save &amp; publish
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => handleSave("draft")} loading={saving}>
+                Unpublish
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="space-y-6">
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">Metadata</h2>
-          <TextInput label="Title" required value={title} onChange={(e) => setTitle(e.target.value)} />
-          <TextArea
-            label="Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-          />
-          <TextArea
-            label="Confirmation message"
-            value={confirmationMessage}
-            onChange={(e) => setConfirmationMessage(e.target.value)}
-            rows={2}
-            helperText="Shown after a successful submission."
-          />
-          <SelectField
-            label="reCAPTCHA"
-            value={recaptchaRequired ? "yes" : "no"}
-            onChange={(e) => setRecaptchaRequired(e.target.value === "yes")}
-            options={[
-              { label: "Required (recommended)", value: "yes" },
-              { label: "Disabled (authenticated portals only)", value: "no" },
-            ]}
-          />
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-            PDF generation
-          </h2>
-          <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={pdfEnabled}
-              onChange={(e) => setPdfEnabled(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
-            />
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                Generate a branded PDF for each submission
-              </p>
-              <p className="text-xs text-muted mt-1">
-                Attached to the admin notification email. Useful for letter
-                templates, payment plan requests, and anything you&rsquo;d previously
-                send to Gravity PDF.
-              </p>
-            </div>
-          </label>
-          {pdfEnabled && (
-            <TextInput
-              label="Filename prefix (optional)"
-              value={pdfFilenamePrefix}
-              onChange={(e) => setPdfFilenamePrefix(e.target.value)}
-              placeholder={`${definition.slug}`}
-              helperText="Submission id is appended automatically. Defaults to the form slug."
-            />
-          )}
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-            Form fields
-          </h2>
-          {unparseableCount > 0 ? (
-            <div
-              className="rounded-[8px] border border-error bg-error-light px-4 py-3 text-sm text-error"
-              role="alert"
-            >
-              {unparseableCount} field{unparseableCount === 1 ? "" : "s"} in this
-              form couldn&rsquo;t be parsed and {unparseableCount === 1 ? "is" : "are"}{" "}
-              hidden from the visual builder. The builder is locked until you
-              repair the raw definition in <strong>Advanced: edit as JSON</strong>{" "}
-              below — saving now would permanently delete{" "}
-              {unparseableCount === 1 ? "it" : "them"}.
-            </div>
-          ) : (
-            <FieldBuilder value={fields} onChange={handleFieldsChange} />
-          )}
-
-          <details
-            open={advancedOpen}
-            onToggle={handleAdvancedToggle}
-            className="rounded-[8px] border border-border px-3 py-2"
-          >
-            <summary className="cursor-pointer text-sm font-medium text-foreground">
-              Advanced: edit as JSON
-            </summary>
-            <div className="mt-3 space-y-2">
-              <p className="text-xs text-muted">
-                The visual builder above is the source of truth. Paste or edit
-                JSON here to bulk-replace the fields — valid changes sync back
-                into the builder.
-              </p>
-              <textarea
-                className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
-                rows={16}
-                value={fieldJsonDraft}
-                onChange={(e) => handleFieldJsonChange(e.target.value)}
-                spellCheck={false}
+      {/* Two-pane body */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0">
+        {/* LEFT: editor */}
+        <section className="overflow-y-auto lg:border-r border-border bg-white">
+          <div className="p-5 space-y-6 max-w-2xl">
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">Metadata</h2>
+              <TextInput label="Title" required value={title} onChange={(e) => setTitle(e.target.value)} />
+              <TextArea
+                label="Description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={2}
               />
-              {fieldJsonError && (
-                <p className="text-xs text-error" role="alert">
-                  {fieldJsonError}
-                </p>
+              <TextArea
+                label="Confirmation message"
+                value={confirmationMessage}
+                onChange={(e) => setConfirmationMessage(e.target.value)}
+                rows={2}
+                helperText="Shown after a successful submission."
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <SelectField
+                  label="reCAPTCHA"
+                  value={recaptchaRequired ? "yes" : "no"}
+                  onChange={(e) => setRecaptchaRequired(e.target.value === "yes")}
+                  options={[
+                    { label: "Required (recommended)", value: "yes" },
+                    { label: "Disabled (authenticated portals only)", value: "no" },
+                  ]}
+                />
+                <SelectField
+                  label="Layout width"
+                  value={width}
+                  onChange={(e) => setWidth(e.target.value === "boxed" ? "boxed" : "full")}
+                  options={[
+                    { label: "Full width (fills the page when embedded)", value: "full" },
+                    { label: "Boxed (centered, readable max-width)", value: "boxed" },
+                  ]}
+                />
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">Form fields</h2>
+              {unparseableCount > 0 ? (
+                <div
+                  className="rounded-[8px] border border-error bg-error-light px-4 py-3 text-sm text-error"
+                  role="alert"
+                >
+                  {unparseableCount} field{unparseableCount === 1 ? "" : "s"} in this
+                  form couldn&rsquo;t be parsed and {unparseableCount === 1 ? "is" : "are"}{" "}
+                  hidden from the visual builder. The builder is locked until you
+                  repair the raw definition in <strong>Advanced: edit as JSON</strong>{" "}
+                  below — saving now would permanently delete{" "}
+                  {unparseableCount === 1 ? "it" : "them"}.
+                </div>
+              ) : (
+                <FieldBuilder value={fields} onChange={handleFieldsChange} />
+              )}
+
+              <details
+                open={advancedOpen}
+                onToggle={handleAdvancedToggle}
+                className="rounded-[8px] border border-border px-3 py-2"
+              >
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
+                  Advanced: edit fields as JSON
+                </summary>
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-muted">
+                    The visual builder above is the source of truth. Paste or edit
+                    JSON here to bulk-replace the fields — valid changes sync back
+                    into the builder.
+                  </p>
+                  <textarea
+                    className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    rows={14}
+                    value={fieldJsonDraft}
+                    onChange={(e) => handleFieldJsonChange(e.target.value)}
+                    spellCheck={false}
+                  />
+                  {fieldJsonError && (
+                    <p className="text-xs text-error" role="alert">
+                      {fieldJsonError}
+                    </p>
+                  )}
+                </div>
+              </details>
+            </section>
+
+            {/* Advanced: PDF / notifications / workflow tucked away */}
+            <details className="rounded-[8px] border border-border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wider text-muted">
+                Advanced: notifications, PDF &amp; approval workflow
+              </summary>
+              <div className="mt-4 space-y-6">
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold text-foreground">PDF generation</h3>
+                  <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pdfEnabled}
+                      onChange={(e) => setPdfEnabled(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Generate a branded PDF for each submission
+                      </p>
+                      <p className="text-xs text-muted mt-1">
+                        Attached to the admin notification email. Useful for letter
+                        templates, payment plan requests, and anything you&rsquo;d previously
+                        send to Gravity PDF.
+                      </p>
+                    </div>
+                  </label>
+                  {pdfEnabled && (
+                    <TextInput
+                      label="Filename prefix (optional)"
+                      value={pdfFilenamePrefix}
+                      onChange={(e) => setPdfFilenamePrefix(e.target.value)}
+                      placeholder={`${definition.slug}`}
+                      helperText="Submission id is appended automatically. Defaults to the form slug."
+                    />
+                  )}
+                </section>
+
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold text-foreground">Notification rules (JSON)</h3>
+                  <textarea
+                    className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    rows={8}
+                    value={notificationConfigJson}
+                    onChange={(e) => setNotificationConfigJson(e.target.value)}
+                    spellCheck={false}
+                  />
+                  <p className="text-xs text-muted">
+                    Each rule needs <code>recipients</code> (emails or <code>{`{{field.<id>}}`}</code> tokens) and
+                    a <code>subject</code>. Optional <code>conditional</code> gates the rule on a field value.
+                  </p>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold text-foreground">Workflow (Gravity Flow replacement)</h3>
+                  <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={workflowEnabled}
+                      onChange={(e) => setWorkflowEnabled(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Route every submission through approval steps
+                      </p>
+                      <p className="text-xs text-muted mt-1">
+                        Each submission emits a magic-link email at each step. The
+                        approver clicks <strong>Approve</strong>/<strong>Reject</strong>/<strong>Send back</strong>{" "}
+                        &mdash; no login. Tokens expire in 30 days.
+                      </p>
+                    </div>
+                  </label>
+                  {workflowEnabled && (
+                    <>
+                      <textarea
+                        className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        rows={10}
+                        value={workflowStepsJson}
+                        onChange={(e) => setWorkflowStepsJson(e.target.value)}
+                        spellCheck={false}
+                      />
+                      <p className="text-xs text-muted">
+                        Array of steps. Each step needs <code>id</code>,{" "}
+                        <code>label</code>, and an <code>assignee</code> object:{" "}
+                        <code>{`{type:"literal",email:"..."}`}</code>,{" "}
+                        <code>{`{type:"field_email",fieldId:"..."}`}</code>, or{" "}
+                        <code>{`{type:"admin_fallback"}`}</code>. Optional:{" "}
+                        <code>actions</code>, <code>due_in_days</code>,{" "}
+                        <code>email_subject</code>, <code>comment_loop_back</code>.
+                      </p>
+                    </>
+                  )}
+                </section>
+              </div>
+            </details>
+
+            {validationError && (
+              <pre
+                className="rounded-[8px] border border-error bg-error-light px-4 py-3 text-xs text-error whitespace-pre-wrap"
+                role="alert"
+              >
+                {validationError}
+              </pre>
+            )}
+
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+              <Button onClick={() => handleSave()} loading={saving}>
+                Save
+              </Button>
+              {definition.status !== "published" && (
+                <Button variant="secondary" onClick={() => handleSave("published")} loading={saving}>
+                  Save &amp; publish
+                </Button>
+              )}
+              {definition.status === "published" && (
+                <Button variant="outline" onClick={() => handleSave("draft")} loading={saving}>
+                  Unpublish
+                </Button>
+              )}
+              {definition.status !== "archived" && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (confirm("Archive this form? It will stop accepting submissions.")) {
+                      void handleSave("archived");
+                    }
+                  }}
+                  loading={saving}
+                  className="!border-error !text-error hover:!bg-error-light"
+                >
+                  Archive
+                </Button>
               )}
             </div>
-          </details>
+          </div>
         </section>
 
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-            Notification rules (JSON)
-          </h2>
-          <textarea
-            className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
-            rows={10}
-            value={notificationConfigJson}
-            onChange={(e) => setNotificationConfigJson(e.target.value)}
-            spellCheck={false}
-          />
-          <p className="text-xs text-muted">
-            Each rule needs <code>recipients</code> (emails or <code>{`{{field.<id>}}`}</code> tokens) and
-            a <code>subject</code>. Optional <code>conditional</code> gates the rule on a field value.
-          </p>
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-            Workflow (Gravity Flow replacement)
-          </h2>
-          <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={workflowEnabled}
-              onChange={(e) => setWorkflowEnabled(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
-            />
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                Route every submission through approval steps
-              </p>
-              <p className="text-xs text-muted mt-1">
-                Each submission emits a magic-link email at each step. The
-                approver clicks <strong>Approve</strong>/<strong>Reject</strong>/<strong>Send back</strong>{" "}
-                &mdash; no login. Tokens expire in 30 days.
-              </p>
+        {/* RIGHT: live preview */}
+        <section className="overflow-y-auto bg-gray-100 hidden lg:block">
+          <div className="sticky top-0 z-10 bg-gray-100/90 backdrop-blur px-5 py-3 flex flex-wrap items-center gap-2 border-b border-border">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted">Live preview</span>
+            <span className="text-[11px] text-muted">
+              {width === "full" ? "as embedded · full width" : "boxed"}
+            </span>
+            <div className="ml-auto flex items-center gap-1 bg-white rounded-lg p-1 border border-border">
+              <button
+                type="button"
+                onClick={() => setPreviewDevice("desktop")}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium ${previewDevice === "desktop" ? "bg-primary text-white" : "text-muted"}`}
+              >
+                Desktop
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewDevice("mobile")}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium ${previewDevice === "mobile" ? "bg-primary text-white" : "text-muted"}`}
+              >
+                Mobile
+              </button>
             </div>
-          </label>
-          {workflowEnabled && (
-            <>
-              <textarea
-                className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
-                rows={12}
-                value={workflowStepsJson}
-                onChange={(e) => setWorkflowStepsJson(e.target.value)}
-                spellCheck={false}
-              />
-              <p className="text-xs text-muted">
-                Array of steps. Each step needs <code>id</code>,{" "}
-                <code>label</code>, and an <code>assignee</code> object:{" "}
-                <code>{`{type:"literal",email:"..."}`}</code>,{" "}
-                <code>{`{type:"field_email",fieldId:"..."}`}</code>, or{" "}
-                <code>{`{type:"admin_fallback"}`}</code>. Optional:{" "}
-                <code>actions</code>, <code>due_in_days</code>,{" "}
-                <code>email_subject</code>, <code>comment_loop_back</code>.
-              </p>
-            </>
-          )}
+          </div>
+
+          <div className="p-6">
+            <div className={previewFrame}>
+              <div className="rounded-2xl overflow-hidden shadow-sm border border-border bg-white">
+                <div className="bg-primary px-6 py-4 text-white">
+                  <p className="text-base font-bold leading-tight">PS Property Management</p>
+                  <p className="text-[11px] text-white/70">512-251-6122 | psprop.net</p>
+                </div>
+                <div className="p-6">
+                  <h1 className="text-2xl font-bold text-navy">{title || "Untitled form"}</h1>
+                  {description.trim() && (
+                    <p className="mt-1 text-sm text-muted">{description}</p>
+                  )}
+                  <div className="mt-5">
+                    {fields.length === 0 ? (
+                      <p className="text-sm text-muted">Add a field to see it here.</p>
+                    ) : (
+                      <DynamicForm key={previewKey} definition={previewDefinition} preview />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
-
-        {validationError && (
-          <pre
-            className="rounded-[8px] border border-error bg-error-light px-4 py-3 text-xs text-error whitespace-pre-wrap"
-            role="alert"
-          >
-            {validationError}
-          </pre>
-        )}
-
-        <div className="flex flex-wrap gap-2 sticky bottom-0 bg-white py-3 border-t border-border">
-          <Button onClick={() => handleSave()} loading={saving}>
-            Save
-          </Button>
-          {definition.status !== "published" && (
-            <Button variant="secondary" onClick={() => handleSave("published")} loading={saving}>
-              Save & publish
-            </Button>
-          )}
-          {definition.status === "published" && (
-            <Button variant="secondary" onClick={() => handleSave("draft")} loading={saving}>
-              Unpublish
-            </Button>
-          )}
-          {definition.status !== "archived" && (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                if (confirm("Archive this form? It will stop accepting submissions.")) {
-                  void handleSave("archived");
-                }
-              }}
-              loading={saving}
-            >
-              Archive
-            </Button>
-          )}
-        </div>
       </div>
-    </FormLayout>
+    </div>
   );
 }

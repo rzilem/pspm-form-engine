@@ -26,6 +26,8 @@ const HALF_WIDTH_TYPES = new Set<FieldType>([
 
 interface DynamicFormProps {
   definition: FormDefinition;
+  // Builder live-preview: render exactly as end users see it but never submit.
+  preview?: boolean;
 }
 
 /**
@@ -35,7 +37,7 @@ interface DynamicFormProps {
  * recomputes the schema independently — this client copy is purely UX
  * (pre-submit error display).
  */
-export function DynamicForm({ definition }: DynamicFormProps) {
+export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
   const schema = useMemo(
     () => buildSubmissionSchema(definition.field_schema),
     [definition.field_schema],
@@ -66,6 +68,7 @@ export function DynamicForm({ definition }: DynamicFormProps) {
       defaultValues={defaultValues}
       confirmationMessage={definition.confirmation_message}
       recaptcha={definition.recaptcha_required}
+      preview={preview}
     >
       {({ watch }) => {
         // Compute visibility with the SAME transitive resolver the server uses,
@@ -91,7 +94,11 @@ export function DynamicForm({ definition }: DynamicFormProps) {
                       HALF_WIDTH_TYPES.has(field.type) ? "" : "@2xl:col-span-2"
                     }
                   >
-                    <DynamicField field={field} formSlug={definition.slug} />
+                    <DynamicField
+                      field={field}
+                      formSlug={definition.slug}
+                      preview={preview}
+                    />
                   </div>
                 ))}
             </div>

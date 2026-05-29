@@ -17,6 +17,9 @@ interface DynamicFieldProps {
   // field types ignore it; making it a separate prop (not threading through
   // a context) keeps DynamicField a pure component for unit tests.
   formSlug: string;
+  // Builder live-preview: passed to file_upload so the dropzone never posts a
+  // real staged upload while editing.
+  preview?: boolean;
 }
 
 /**
@@ -28,7 +31,7 @@ interface DynamicFieldProps {
  * side validation (in form-definitions.ts buildSubmissionSchema) is the
  * source of truth — this UI gate is purely cosmetic.
  */
-export function DynamicField({ field, formSlug }: DynamicFieldProps) {
+export function DynamicField({ field, formSlug, preview = false }: DynamicFieldProps) {
   const { register, formState, control } = useFormContext();
 
   // Conditional visibility is decided by the parent (DynamicForm) via the
@@ -188,6 +191,7 @@ export function DynamicField({ field, formSlug }: DynamicFieldProps) {
             multiple
             helpText={field.helpText}
             error={error}
+            preview={preview}
             value={
               Array.isArray(controllerField.value)
                 ? (controllerField.value as UploadedFile[])

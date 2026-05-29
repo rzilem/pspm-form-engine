@@ -17,6 +17,9 @@ interface DynamicFileUploadProps {
   error?: FormFieldError;
   value?: UploadedFile[];
   onChange?: (files: UploadedFile[]) => void;
+  // Builder live-preview: render the dropzone but never post to /api/upload so
+  // editing a form can't create real staged uploads.
+  preview?: boolean;
 }
 
 interface PendingFile {
@@ -54,6 +57,7 @@ export function DynamicFileUpload({
   error,
   value,
   onChange,
+  preview = false,
 }: DynamicFileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingFile[]>([]);
@@ -131,6 +135,10 @@ export function DynamicFileUpload({
 
   const addFiles = useCallback(
     (files: FileList | null) => {
+      // Preview mode: the single entry point for both the file input and the
+      // drop target, so this guard keeps the builder preview from ever
+      // posting to /api/upload.
+      if (preview) return;
       if (!files || files.length === 0) return;
 
       const accepted: PendingFile[] = [];
@@ -154,7 +162,7 @@ export function DynamicFileUpload({
         void uploadOne(entry);
       }
     },
-    [multiple, uploadOne],
+    [multiple, uploadOne, preview],
   );
 
   const removeFile = useCallback(
@@ -197,9 +205,11 @@ export function DynamicFileUpload({
           e.preventDefault();
           setDragActive(false);
         }}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          if (!preview) inputRef.current?.click();
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
+          if (!preview && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             inputRef.current?.click();
           }
@@ -227,6 +237,7 @@ export function DynamicFileUpload({
         id={inputId}
         type="file"
         multiple={multiple}
+        disabled={preview}
         onChange={(e) => addFiles(e.target.files)}
         className="sr-only"
         tabIndex={-1}

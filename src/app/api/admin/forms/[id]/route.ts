@@ -32,6 +32,7 @@ const updateSchema = z.object({
   workflow_config: workflowConfigSchema.optional(),
   confirmation_message: z.string().min(1).max(500).optional(),
   recaptcha_required: z.boolean().optional(),
+  width: z.enum(["full", "boxed"]).optional(),
 });
 
 interface RouteContext {

@@ -38,6 +38,11 @@ interface FormEngineProps<T extends FieldValues> {
   // reCAPTCHA even if NEXT_PUBLIC_RECAPTCHA_SITE_KEY is configured (e.g. private
   // forms that explicitly set recaptcha_required=false). Defaults to true.
   recaptcha?: boolean;
+  // Builder live-preview mode. When true the form renders exactly as it will
+  // for end users but never submits (the button is disabled and onSubmit is a
+  // no-op) and never loads reCAPTCHA — so editing a form in the admin builder
+  // can't post a real submission.
+  preview?: boolean;
   children: (props: {
     errors: FieldErrors<T>;
     register: ReturnType<typeof useForm<T>>["register"];
@@ -53,6 +58,7 @@ function FormEngine<T extends FieldValues>({
   defaultValues,
   confirmationMessage,
   recaptcha = true,
+  preview = false,
   children,
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
@@ -62,7 +68,7 @@ function FormEngine<T extends FieldValues>({
   // reCAPTCHA is active only when a site key is configured AND this form hasn't
   // opted out (recaptcha=false). Drives the script load, token fetch, and the
   // Google disclosure so an opted-out form does none of them.
-  const recaptchaActive = Boolean(RECAPTCHA_SITE_KEY) && recaptcha;
+  const recaptchaActive = Boolean(RECAPTCHA_SITE_KEY) && recaptcha && !preview;
 
   // Lazy-load the reCAPTCHA v3 script only when reCAPTCHA is active.
   useEffect(() => {
@@ -86,6 +92,8 @@ function FormEngine<T extends FieldValues>({
   } = methods;
 
   async function onSubmit(data: T) {
+    // Builder preview never posts a real submission.
+    if (preview) return;
     setSubmitError(null);
     try {
       // Fetch a reCAPTCHA v3 token when active. On any failure, submit without
@@ -213,7 +221,13 @@ function FormEngine<T extends FieldValues>({
           </div>
         )}
 
-        <Button type="submit" size="lg" loading={isSubmitting} className="w-full">
+        <Button
+          type="submit"
+          size="lg"
+          loading={isSubmitting}
+          disabled={preview}
+          className="w-full"
+        >
           Submit
         </Button>
       </form>
