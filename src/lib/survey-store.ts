@@ -403,6 +403,12 @@ export async function recordAnswer(opts: {
     };
   }
 
+  // Anonymous surveys must record independent responses. The built-in client
+  // always sends a token (and clients are untrusted), so null it out server-side
+  // for anonymous mode — otherwise the partial unique index would upsert one
+  // response per device.
+  const effectiveToken = survey.response_mode === "anonymous" ? null : opts.participantToken;
+
   // Atomic gated write: the RPC re-checks open+live in the SAME statement as the
   // insert (so a presenter closing mid-flight can't accept a late vote) and is
   // the only place ON CONFLICT can name the partial-index predicate for the
@@ -411,7 +417,7 @@ export async function recordAnswer(opts: {
     p_survey_id: opts.surveyId,
     p_question_id: opts.questionId,
     p_answer: parsed.data as Record<string, unknown>,
-    p_participant_token: opts.participantToken,
+    p_participant_token: effectiveToken,
     p_epoch: survey.state_epoch,
     p_ip: opts.ip,
     p_user_agent: opts.userAgent,
