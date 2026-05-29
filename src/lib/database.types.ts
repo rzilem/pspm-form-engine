@@ -405,9 +405,243 @@ export interface Database {
         };
         Relationships: [];
       };
+      survey_meetings: {
+        Row: {
+          id: string;
+          community: string | null;
+          title: string;
+          meeting_date: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          community?: string | null;
+          title: string;
+          meeting_date?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          community?: string | null;
+          title?: string;
+          meeting_date?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      surveys: {
+        Row: {
+          id: string;
+          slug: string | null;
+          title: string;
+          description: string | null;
+          community: string | null;
+          meeting_id: string | null;
+          status: string;
+          results_visibility: string;
+          active_question_id: string | null;
+          state_epoch: number;
+          active_question_open: boolean;
+          response_mode: string;
+          recaptcha_required: boolean;
+          room_code: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+          closed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          slug?: string | null;
+          title: string;
+          description?: string | null;
+          community?: string | null;
+          meeting_id?: string | null;
+          status?: string;
+          results_visibility?: string;
+          active_question_id?: string | null;
+          state_epoch?: number;
+          active_question_open?: boolean;
+          response_mode?: string;
+          recaptcha_required?: boolean;
+          room_code?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          closed_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          slug?: string | null;
+          title?: string;
+          description?: string | null;
+          community?: string | null;
+          meeting_id?: string | null;
+          status?: string;
+          results_visibility?: string;
+          active_question_id?: string | null;
+          state_epoch?: number;
+          active_question_open?: boolean;
+          response_mode?: string;
+          recaptcha_required?: boolean;
+          room_code?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          closed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      survey_questions: {
+        Row: {
+          id: string;
+          survey_id: string;
+          position: number;
+          type: string;
+          prompt: string;
+          config: Record<string, unknown>;
+          state: string;
+          results_visibility: string | null;
+          opened_at: string | null;
+          closed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          survey_id: string;
+          position: number;
+          type: string;
+          prompt: string;
+          config?: Record<string, unknown>;
+          state?: string;
+          results_visibility?: string | null;
+          opened_at?: string | null;
+          closed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          survey_id?: string;
+          position?: number;
+          type?: string;
+          prompt?: string;
+          config?: Record<string, unknown>;
+          state?: string;
+          results_visibility?: string | null;
+          opened_at?: string | null;
+          closed_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      survey_responses: {
+        Row: {
+          id: string;
+          survey_id: string;
+          question_id: string;
+          answer: Record<string, unknown>;
+          participant_token: string | null;
+          state_epoch_at_answer: number | null;
+          ip_address: string | null;
+          user_agent: string | null;
+          suspect: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          survey_id: string;
+          question_id: string;
+          answer: Record<string, unknown>;
+          participant_token?: string | null;
+          state_epoch_at_answer?: number | null;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          suspect?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          survey_id?: string;
+          question_id?: string;
+          answer?: Record<string, unknown>;
+          participant_token?: string | null;
+          state_epoch_at_answer?: number | null;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          suspect?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      survey_tokens: {
+        Row: {
+          id: string;
+          survey_id: string;
+          kind: string;
+          token_hash: string;
+          expires_at: string | null;
+          revoked_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          survey_id: string;
+          kind: string;
+          token_hash: string;
+          expires_at?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          survey_id?: string;
+          kind?: string;
+          token_hash?: string;
+          expires_at?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      survey_question_aggregate: {
+        Args: { p_question_id: string };
+        Returns: unknown;
+      };
+      submit_survey_response: {
+        Args: {
+          p_survey_id: string;
+          p_question_id: string;
+          p_answer: Record<string, unknown>;
+          p_participant_token: string | null;
+          p_epoch: number;
+          p_ip: string | null;
+          p_user_agent: string | null;
+        };
+        Returns: string;
+      };
+      survey_apply_transition: {
+        Args: {
+          p_survey_id: string;
+          p_expected_epoch: number;
+          p_next_active_id: string | null;
+          p_active_open: boolean;
+          p_next_status: string;
+          p_target_id: string | null;
+          p_target_state: string | null;
+          p_close_others: boolean;
+        };
+        Returns: unknown;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
@@ -418,3 +652,8 @@ export type AvailabilityRule = Database["public"]["Tables"]["availability_rules"
 export type BlackoutDate = Database["public"]["Tables"]["blackout_dates"]["Row"];
 export type Reservation = Database["public"]["Tables"]["reservations"]["Row"];
 export type SlotHold = Database["public"]["Tables"]["slot_holds"]["Row"];
+export type SurveyMeeting = Database["public"]["Tables"]["survey_meetings"]["Row"];
+export type Survey = Database["public"]["Tables"]["surveys"]["Row"];
+export type SurveyQuestion = Database["public"]["Tables"]["survey_questions"]["Row"];
+export type SurveyResponse = Database["public"]["Tables"]["survey_responses"]["Row"];
+export type SurveyToken = Database["public"]["Tables"]["survey_tokens"]["Row"];
