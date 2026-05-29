@@ -24,12 +24,14 @@ export const FIELD_TYPES = [
   "checkbox_group",
   "select",
   "date",
+  "time",
   "name",
   "address",
   "consent",
   "file_upload",
   "signature",
   "section_break",
+  "html",
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -64,6 +66,9 @@ export const fieldDefinitionSchema = z.object({
   helpText: z.string().max(500).optional(),
   placeholder: z.string().max(200).optional(),
   options: z.array(fieldOptionSchema).optional(),
+  // Raw HTML body for an "html" display block (rendered sanitized; never a
+  // submission value). Ignored by every other field type.
+  html: z.string().max(20000).optional(),
   // Optional validation hints (max length, min/max number, etc.)
   validation: z
     .object({
@@ -229,7 +234,8 @@ export function buildSubmissionSchema(
   const conditionalLeaves: { field: FieldDefinition; leaf: z.ZodTypeAny }[] = [];
 
   for (const f of fields) {
-    if (f.type === "section_break") continue;
+    // Display-only blocks carry no submission value.
+    if (f.type === "section_break" || f.type === "html") continue;
 
     let leaf: z.ZodTypeAny;
 
@@ -325,6 +331,9 @@ export function buildSubmissionSchema(
         break;
       }
       case "date":
+        leaf = z.string();
+        break;
+      case "time":
         leaf = z.string();
         break;
       case "radio":

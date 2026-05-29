@@ -8,6 +8,7 @@ import { CheckboxGroup } from "@/components/ui/CheckboxGroup";
 import { SelectField } from "@/components/ui/SelectField";
 import { ConsentCheckbox } from "@/components/forms/ConsentCheckbox";
 import { DynamicFileUpload } from "@/components/forms/DynamicFileUpload";
+import DOMPurify from "isomorphic-dompurify";
 import { SignaturePad } from "@/components/forms/SignaturePad";
 import type { FieldDefinition, UploadedFile } from "@/lib/form-definitions";
 
@@ -49,6 +50,34 @@ export function DynamicField({ field, formSlug, preview = false }: DynamicFieldP
           <p className="text-sm text-muted mt-1">{field.helpText}</p>
         )}
       </div>
+    );
+  }
+
+  if (field.type === "html") {
+    // Display-only rich-content block. Admin-authored, but rendered to public
+    // users INSIDE the submission <form> — so sanitize on every render with a
+    // strict display-only allow-list (no form controls/script/iframe/style, so
+    // a pasted <button>/<input> can't hijack or submit the form).
+    const clean = DOMPurify.sanitize(field.html ?? "", {
+      ALLOWED_TAGS: [
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "p", "br", "hr", "span", "div",
+        "ul", "ol", "li",
+        "a", "strong", "em", "b", "i", "u", "s",
+        "blockquote", "code", "pre", "img",
+        "table", "thead", "tbody", "tr", "th", "td",
+      ],
+      ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "title"],
+      // Belt-and-suspenders: never allow interactive/scripting markup even if
+      // a future ALLOWED_TAGS edit adds it.
+      FORBID_TAGS: ["form", "input", "button", "textarea", "select", "option", "script", "style", "iframe"],
+    });
+    if (!clean.trim()) return null;
+    return (
+      <div
+        className="text-sm text-foreground [&_a]:text-primary [&_a]:underline [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:text-navy [&_h2]:font-semibold [&_h2]:text-navy [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_strong]:font-semibold"
+        dangerouslySetInnerHTML={{ __html: clean }}
+      />
     );
   }
 
@@ -274,7 +303,9 @@ export function DynamicField({ field, formSlug, preview = false }: DynamicFieldP
           ? "number"
           : field.type === "date"
             ? "date"
-            : "text";
+            : field.type === "time"
+              ? "time"
+              : "text";
 
   return (
     <TextInput

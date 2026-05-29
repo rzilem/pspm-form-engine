@@ -27,12 +27,14 @@ const TYPE_LABELS: Record<FieldType, string> = {
   checkbox_group: "Checkboxes (multi-select)",
   select: "Dropdown (select)",
   date: "Date",
+  time: "Time",
   name: "Name (first + last)",
   address: "Address",
   consent: "Consent checkbox",
   file_upload: "File upload",
   signature: "Signature",
   section_break: "Section heading",
+  html: "HTML block",
 };
 
 const TYPE_OPTIONS = FIELD_TYPES.map((t) => ({ value: t, label: TYPE_LABELS[t] }));
@@ -72,6 +74,7 @@ const TRIGGER_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "phone",
   "number",
   "date",
+  "time",
   "radio",
   "select",
 ]);
@@ -232,6 +235,10 @@ function FieldCard({
   onDelete,
 }: FieldCardProps) {
   const isSectionBreak = field.type === "section_break";
+  const isHtml = field.type === "html";
+  // Display-only blocks (heading, HTML) carry no value, so they hide the
+  // Required toggle and validation.
+  const isDisplayOnly = isSectionBreak || isHtml;
   const showOptions = TYPES_WITH_OPTIONS.has(field.type);
   const showPlaceholder = TYPES_WITH_PLACEHOLDER.has(field.type);
   const showLengthValidation = TYPES_WITH_LENGTH_VALIDATION.has(field.type);
@@ -292,7 +299,7 @@ function FieldCard({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <TextInput
-          label={isSectionBreak ? "Heading text" : "Label"}
+          label={isSectionBreak ? "Heading text" : isHtml ? "Block label (admin only, not shown)" : "Label"}
           value={field.label}
           onChange={(e) => onPatch({ label: e.target.value })}
         />
@@ -304,7 +311,27 @@ function FieldCard({
         />
       </div>
 
-      {!isSectionBreak && (
+      {isHtml && (
+        <div>
+          <label className="text-sm font-medium text-foreground block mb-1">
+            HTML content
+          </label>
+          <textarea
+            className="w-full font-mono text-xs rounded-[8px] border border-border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            rows={6}
+            value={field.html ?? ""}
+            onChange={(e) => onPatch({ html: e.target.value || undefined })}
+            spellCheck={false}
+            placeholder="<p>Rich text shown to form viewers. Sanitized on render — scripts are stripped.</p>"
+          />
+          <p className="text-xs text-muted mt-1">
+            Basic HTML only (headings, paragraphs, lists, links, bold). Scripts
+            and event handlers are removed automatically.
+          </p>
+        </div>
+      )}
+
+      {!isDisplayOnly && (
         <label className="flex items-center gap-2 text-sm text-foreground">
           <input
             type="checkbox"
@@ -316,12 +343,14 @@ function FieldCard({
         </label>
       )}
 
-      <TextInput
-        label={isSectionBreak ? "Sub-heading / help text" : "Help text"}
-        value={field.helpText ?? ""}
-        onChange={(e) => onPatch({ helpText: e.target.value || undefined })}
-        helperText="Optional. Shown under the field."
-      />
+      {!isHtml && (
+        <TextInput
+          label={isSectionBreak ? "Sub-heading / help text" : "Help text"}
+          value={field.helpText ?? ""}
+          onChange={(e) => onPatch({ helpText: e.target.value || undefined })}
+          helperText="Optional. Shown under the field."
+        />
+      )}
 
       {showPlaceholder && (
         <TextInput

@@ -51,6 +51,7 @@ const gfFieldSchema = z
     isRequired: z.unknown().optional(),
     placeholder: z.string().optional(),
     description: z.string().optional(),
+    content: z.string().optional(),
     choices: arrayOrEmpty(gfChoiceSchema),
     inputs: arrayOrEmpty(z.unknown()),
     pageNumber: z.union([z.string(), z.number()]).optional(),
@@ -146,6 +147,7 @@ const FIELD_TYPE_MAP: Record<string, FieldDefinition["type"] | null> = {
   select: "select",
   multiselect: "select", // close enough for v1
   date: "date",
+  time: "time",
   name: "name",
   address: "address",
   consent: "consent",
@@ -169,7 +171,7 @@ const FIELD_TYPE_MAP: Record<string, FieldDefinition["type"] | null> = {
   creditcard: null,
   password: null,
   captcha: null,
-  html: null,
+  html: "html",
 };
 
 // `category` lets the import preview render field-level vs notification-
@@ -269,6 +271,11 @@ function mapField(
     helpText,
     placeholder,
     options,
+    // GF "html" blocks store their markup in `content`; carry it into our
+    // html field (sanitized at render). Ignored by every other type.
+    ...(mappedType === "html" && gf.content
+      ? { html: gf.content.slice(0, 20000) }
+      : {}),
   };
   // Validate against the canonical schema so a bad GF row surfaces here
   // rather than as a runtime crash later.

@@ -21,6 +21,7 @@ const HALF_WIDTH_TYPES = new Set<FieldType>([
   "phone",
   "number",
   "date",
+  "time",
   "select",
 ]);
 
@@ -49,7 +50,7 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
   const defaultValues = useMemo(() => {
     const out: Record<string, unknown> = {};
     for (const f of definition.field_schema) {
-      if (f.type === "section_break") continue;
+      if (f.type === "section_break" || f.type === "html") continue;
       if (f.type === "consent") out[f.id] = false;
       else if (f.type === "checkbox_group" || f.type === "file_upload")
         out[f.id] = [];
