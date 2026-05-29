@@ -92,17 +92,34 @@ function normalizeQuestionConfig(q: CreateQuestionInput): { config: Record<strin
   rawConfig.type = q.type;
 
   if ((q.type === "single_choice" || q.type === "multi_choice" || q.type === "yes_no") && Array.isArray(rawConfig.options)) {
+    const seen = new Set<string>();
     rawConfig.options = (rawConfig.options as unknown[]).map((opt, i) => {
+      let id: string;
+      let label: string;
       if (typeof opt === "string") {
-        return { id: slugifyOption(opt, i), label: opt.slice(0, 200) };
-      }
-      if (opt && typeof opt === "object") {
+        id = slugifyOption(opt, i);
+        label = opt.slice(0, 200);
+      } else if (opt && typeof opt === "object") {
         const o = opt as Record<string, unknown>;
-        const label = typeof o.label === "string" ? o.label : String(o.value ?? "");
-        const id = typeof o.id === "string" && o.id ? o.id : slugifyOption(label, i);
-        return { id: id.slice(0, 64), label: label.slice(0, 200) };
+        label = (typeof o.label === "string" ? o.label : String(o.value ?? "")).slice(0, 200);
+        id = (typeof o.id === "string" && o.id ? o.id : slugifyOption(label, i)).slice(0, 64);
+      } else {
+        id = `opt_${i}`;
+        label = `Option ${i + 1}`;
       }
-      return { id: `opt_${i}`, label: `Option ${i + 1}` };
+      // Distinct labels can slugify to the same id ("Yes!" / "Yes") — make ids
+      // unique so the UI keys + answer buckets stay distinct.
+      if (seen.has(id)) {
+        let suffix = 2;
+        let candidate = `${id}_${suffix}`.slice(0, 64);
+        while (seen.has(candidate)) {
+          suffix += 1;
+          candidate = `${id}_${suffix}`.slice(0, 64);
+        }
+        id = candidate;
+      }
+      seen.add(id);
+      return { id, label };
     });
   }
 
@@ -486,11 +503,11 @@ export async function presenterAction(opts: {
     return { ok: false, status: 404, body: { error: "Target question not found" } };
   }
 
-  // Decide the survey's next active_question_id + status.
+  // Decide the survey's next active_question_id + status. Only an open ('open'
+  // newState) moves the live pointer; close/reveal/reset keep the current slide
+  // (reset's newState is 'pending', so it must be listed explicitly here).
   const nextActiveId =
-    newState === "closed" || newState === "revealed" || newState === "reset"
-      ? survey.active_question_id // keep pointing at the same slide
-      : targetId;
+    newState === "open" ? targetId : survey.active_question_id;
   const nextStatus = newState === "open" && survey.status === "draft" ? "live" : survey.status;
   // The authoritative vote gate — true only while a question is open. Set in the
   // same UPDATE as the epoch bump so it flips atomically (closes the late-vote
