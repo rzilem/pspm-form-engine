@@ -149,8 +149,8 @@ export function SurveyPresenter({
         </div>
       )}
 
-      {/* Controls */}
-      {canControl && (
+      {/* Controls — hidden once the poll has ended (closed is terminal). */}
+      {canControl && !ended && (
         <div className="border-t border-white/10 bg-black/30 px-4 py-3">
           {notice && <p className="mb-2 text-center text-xs text-amber-300">{notice}</p>}
           <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-2">

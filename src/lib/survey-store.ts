@@ -418,7 +418,12 @@ export async function presenterAction(opts: {
   const supabase = getSupabaseAdmin();
   const survey = await getSurveyById(opts.surveyId);
   if (!survey) return { ok: false, status: 404, body: { error: "Survey not found" } };
-  if (survey.status === "archived") return { ok: false, status: 409, body: { error: "Survey is archived" } };
+  // Terminal states: a closed/archived poll must be explicitly re-opened via the
+  // status endpoint before questions can be mutated again — otherwise Reopen/Next
+  // would set a question open while surveys.status stays closed (inconsistent).
+  if (survey.status === "closed" || survey.status === "archived") {
+    return { ok: false, status: 409, body: { error: `Survey is ${survey.status}`, status: survey.status } };
+  }
 
   const questions = await getQuestions(opts.surveyId);
   if (questions.length === 0) return { ok: false, status: 409, body: { error: "Survey has no questions" } };
