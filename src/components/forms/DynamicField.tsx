@@ -11,11 +11,7 @@ import { DynamicFileUpload } from "@/components/forms/DynamicFileUpload";
 import DOMPurify from "isomorphic-dompurify";
 import { SignaturePad } from "@/components/forms/SignaturePad";
 import type { FieldDefinition, LineItemValue, UploadedFile } from "@/lib/form-definitions";
-import { lineItemTotal } from "@/lib/form-definitions";
-
-function formatMoney(n: number): string {
-  return `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
-}
+import { lineItemTotal, formatMoney } from "@/lib/form-definitions";
 
 interface DynamicFieldProps {
   field: FieldDefinition;

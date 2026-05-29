@@ -7,6 +7,7 @@ import { loadFormDefinition } from "@/lib/form-loader";
 import {
   resolveRecipients,
   lineItemTotal,
+  formatMoney,
   type FormDefinition,
   type FieldDefinition,
 } from "@/lib/form-definitions";
@@ -206,10 +207,10 @@ function renderFieldCellHtml(field: FieldDefinition, raw: unknown): string {
         const desc = escapeHtml(
           String(row.description ?? "").trim() || "(no description)",
         );
-        const amt = (Number(row.amount) || 0).toFixed(2);
-        const lt = lineItemTotal(row, useQty).toFixed(2);
+        const amt = formatMoney(Number(row.amount) || 0);
+        const lt = formatMoney(lineItemTotal(row, useQty));
         const qty = useQty ? ` &times;${escapeHtml(String(row.quantity ?? 1))}` : "";
-        return `<li>${desc} &mdash; $${amt}${qty} = $${lt}</li>`;
+        return `<li>${desc} &mdash; ${amt}${qty} = ${lt}</li>`;
       })
       .join("");
     return `<ul style="margin:0;padding-left:18px">${items}</ul>`;
@@ -218,8 +219,7 @@ function renderFieldCellHtml(field: FieldDefinition, raw: unknown): string {
     // A conditionally hidden total is deleted from the data — skip the row
     // entirely rather than emailing a $0.00 the submitter never saw.
     if (raw === undefined || raw === null) return "";
-    const n = Number(raw);
-    return `<strong>$${(Number.isFinite(n) ? n : 0).toFixed(2)}</strong>`;
+    return `<strong>${formatMoney(raw)}</strong>`;
   }
   const value = formatFieldValue(raw);
   if (!value) return "";

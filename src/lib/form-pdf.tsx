@@ -32,7 +32,7 @@ import type {
   FormDefinition,
   UploadedFile,
 } from "@/lib/form-definitions";
-import { lineItemTotal } from "@/lib/form-definitions";
+import { lineItemTotal, formatMoney } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 
 // PSPM brand palette (mirrors src/index.css custom properties).
@@ -151,6 +151,55 @@ const styles = StyleSheet.create({
     height: 80,
     objectFit: "contain",
   },
+  // Itemized line-items table (invoice-style).
+  liTable: {
+    marginTop: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  liHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: COLORS.navy,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+  },
+  liHeaderText: {
+    color: "#FFFFFF",
+    fontSize: 8,
+    fontWeight: "bold",
+  },
+  liRow: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+  },
+  liRowZebra: { backgroundColor: "#FAFBFF" },
+  liDescCol: { flex: 1, paddingRight: 6 },
+  liNumCol: { width: 70, textAlign: "right" },
+  liQtyCol: { width: 38, textAlign: "right" },
+  liTotalRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 4,
+    marginBottom: 6,
+    paddingTop: 6,
+    borderTopWidth: 2,
+    borderTopColor: COLORS.navy,
+  },
+  liGrandLabel: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: COLORS.navy,
+    marginRight: 16,
+  },
+  liGrandValue: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: COLORS.navy,
+  },
 });
 
 // Format a single value for the PDF cell. Mirrors lib/email.ts logic so
@@ -209,37 +258,74 @@ function renderValueCell(
     // eslint-disable-next-line jsx-a11y/alt-text
     return <Image src={value} style={styles.signatureImage} />;
   }
-  if (field.type === "total") {
-    // Hidden conditional total is absent from data — omit the PDF row.
-    if (value === undefined || value === null) return null;
-    const n = Number(value);
-    return <Text>{`$${(Number.isFinite(n) ? n : 0).toFixed(2)}`}</Text>;
-  }
-  if (field.type === "line_items") {
-    const rows = Array.isArray(value) ? value : [];
-    if (rows.length === 0) return null;
-    const useQty =
-      field.lineItemMode === "preset" || Boolean(field.allowQuantity);
-    return (
-      <View style={styles.fileList}>
-        {rows.map((r, i) => {
-          const row = (r ?? {}) as Record<string, unknown>;
-          const desc = String(row.description ?? "").trim() || "(no description)";
-          const amt = (Number(row.amount) || 0).toFixed(2);
-          const lt = lineItemTotal(row, useQty).toFixed(2);
-          const qty = useQty ? ` x${row.quantity ?? 1}` : "";
-          return (
-            <Text key={i} style={styles.fileItem}>
-              {`• ${desc} — $${amt}${qty} = $${lt}`}
-            </Text>
-          );
-        })}
-      </View>
-    );
-  }
+  // line_items + total are rendered full-width as an itemized invoice table by
+  // the document body (renderLineItemsTable / renderTotalRow), not as a
+  // label/value cell — so they fall through here and are skipped.
+  if (field.type === "line_items" || field.type === "total") return null;
   const text = formatValue(value);
   if (text === "" || text === "—") return null;
   return <Text>{text}</Text>;
+}
+
+// Full-width itemized table for a line_items field. Returns null when empty so
+// the field is skipped. Columns: Description [· Qty · Unit] · Amount(line total).
+function renderLineItemsTable(
+  field: FieldDefinition,
+  value: unknown,
+): React.ReactNode | null {
+  const rows = Array.isArray(value) ? value : [];
+  if (rows.length === 0) return null;
+  const useQty = field.lineItemMode === "preset" || Boolean(field.allowQuantity);
+  return (
+    <View key={field.id} style={styles.liTable} wrap={false}>
+      <View style={styles.liHeaderRow}>
+        <Text style={[styles.liHeaderText, styles.liDescCol]}>
+          {field.label || "Items"}
+        </Text>
+        {useQty ? (
+          <Text style={[styles.liHeaderText, styles.liQtyCol]}>Qty</Text>
+        ) : null}
+        {useQty ? (
+          <Text style={[styles.liHeaderText, styles.liNumCol]}>Unit</Text>
+        ) : null}
+        <Text style={[styles.liHeaderText, styles.liNumCol]}>Amount</Text>
+      </View>
+      {rows.map((r, i) => {
+        const row = (r ?? {}) as Record<string, unknown>;
+        const desc = String(row.description ?? "").trim() || "(no description)";
+        const amt = Number(row.amount) || 0;
+        const qty = row.quantity ?? 1;
+        const lt = lineItemTotal(row, useQty);
+        return (
+          <View key={i} style={[styles.liRow, i % 2 === 1 ? styles.liRowZebra : {}]}>
+            <Text style={styles.liDescCol}>{desc}</Text>
+            {useQty ? <Text style={styles.liQtyCol}>{String(qty)}</Text> : null}
+            {useQty ? (
+              <Text style={styles.liNumCol}>{formatMoney(amt)}</Text>
+            ) : null}
+            <Text style={styles.liNumCol}>{formatMoney(lt)}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// Emphasized grand-total row. Returns null when the value is absent (e.g. a
+// conditionally hidden total) so it stays out of the document.
+function renderTotalRow(
+  field: FieldDefinition,
+  value: unknown,
+): React.ReactNode | null {
+  if (value === undefined || value === null) return null;
+  const n = Number(value);
+  const total = Number.isFinite(n) ? n : 0;
+  return (
+    <View key={field.id} style={styles.liTotalRow} wrap={false}>
+      <Text style={styles.liGrandLabel}>{field.label || "Total"}</Text>
+      <Text style={styles.liGrandValue}>{formatMoney(total)}</Text>
+    </View>
+  );
 }
 
 /**
@@ -303,6 +389,14 @@ function DefaultFormDocument({
             {g.heading ? <Text style={styles.sectionHeading}>{g.heading}</Text> : null}
             <View style={styles.table}>
               {g.fields.map((f, fi) => {
+                // Commerce fields render full-width as an invoice table / total
+                // row rather than a label|value cell.
+                if (f.type === "line_items") {
+                  return renderLineItemsTable(f, data[f.id]);
+                }
+                if (f.type === "total") {
+                  return renderTotalRow(f, data[f.id]);
+                }
                 const cell = renderValueCell(f, data[f.id]);
                 if (cell === null) return null;
                 return (

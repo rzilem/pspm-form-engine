@@ -161,6 +161,16 @@ export const fieldDefinitionSchema = z.object({
 );
 export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
 
+// Shared money formatter (display only): "$1,234.50". Used by the form UI, the
+// PDF, and the email so a dollar amount renders identically everywhere.
+export function formatMoney(n: unknown): string {
+  const v = typeof n === "number" && Number.isFinite(n) ? n : Number(n) || 0;
+  return `$${v.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 // Amount for a single line: amount × quantity when quantity applies, else
 // amount. Rounded to cents. Shared by the client display + the server store so
 // the two never disagree.
