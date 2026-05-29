@@ -31,6 +31,7 @@ export interface SurveyStateResponse {
   status: "draft" | "live" | "closed" | "archived";
   state_epoch: number;
   results_visibility: "live_public" | "private" | "after_close";
+  response_mode: "anonymous" | "one_per_device";
   question_count: number;
   active_question: PublicQuestionView | null;
   results: Aggregate | null;

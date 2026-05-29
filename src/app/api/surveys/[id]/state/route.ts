@@ -28,6 +28,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       status: survey.status, // draft | live | closed | archived
       state_epoch: survey.state_epoch,
       results_visibility: survey.results_visibility,
+      response_mode: survey.response_mode, // anonymous | one_per_device
       question_count: questions.length,
       active_question: active
         ? {

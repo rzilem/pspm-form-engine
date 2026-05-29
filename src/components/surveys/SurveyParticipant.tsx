@@ -108,6 +108,9 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
 
   const active = state?.active_question ?? null;
   const answered = active ? answeredQuestions.has(active.id) : false;
+  // Anonymous polls record independent responses, so there's no "update" — once
+  // this device has answered, lock the question to avoid inflating counts.
+  const lockedAfterAnswer = answered && state?.response_mode === "anonymous";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -144,7 +147,15 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
 
         {state && state.status !== "closed" && active && (
           <div className="rounded-2xl bg-white p-5 shadow-sm">
-            {active.voting_open ? (
+            {active.voting_open && lockedAfterAnswer ? (
+              <>
+                <h2 className="mb-3 text-xl font-bold text-navy">{active.prompt}</h2>
+                <p className="mb-4 text-center text-sm text-muted">Thanks — your response is in.</p>
+                {state.results && !state.results.hidden && (
+                  <LiveResults question={active} aggregate={state.results} />
+                )}
+              </>
+            ) : active.voting_open ? (
               <>
                 <SurveyQuestionCard key={active.id} question={active} onSubmit={submit} submitting={submitting} alreadyAnswered={answered} />
                 {submitError && <p className="mt-3 text-center text-sm text-error">{submitError}</p>}
