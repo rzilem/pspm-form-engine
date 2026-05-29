@@ -9,6 +9,29 @@ import type { SurveyStateResponse } from "./types";
 const POLL_OPEN_MS = 2000;
 const POLL_IDLE_MS = 4000;
 
+// Per-device record of which questions this device has answered, so an
+// anonymous poll's answer-lock survives reload/new-tab (in-memory state alone
+// resets and would let the UI resubmit and inflate counts).
+function answeredKey(surveyId: string): string {
+  return `pspm_survey_answered:${surveyId}`;
+}
+function loadAnsweredIds(surveyId: string): string[] {
+  try {
+    const raw = localStorage.getItem(answeredKey(surveyId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function persistAnsweredIds(surveyId: string, ids: Set<string>): void {
+  try {
+    localStorage.setItem(answeredKey(surveyId), JSON.stringify([...ids]));
+  } catch {
+    /* localStorage blocked — fall back to in-memory only */
+  }
+}
+
 export function SurveyParticipant({ surveyId }: { surveyId: string }) {
   const participantToken = useParticipantToken();
   const [state, setState] = useState<SurveyStateResponse | null>(null);
@@ -71,6 +94,17 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
     };
   }, [refresh, schedule]);
 
+  // Hydrate the device's answered-question set so the anonymous answer-lock
+  // survives reload/new-tab. Deferred so setState isn't called synchronously in
+  // the effect body.
+  useEffect(() => {
+    const h = setTimeout(() => {
+      const ids = loadAnsweredIds(surveyId);
+      if (ids.length) setAnsweredQuestions(new Set(ids));
+    }, 0);
+    return () => clearTimeout(h);
+  }, [surveyId]);
+
   const submit = useCallback(
     async (answer: Record<string, unknown>) => {
       const active = stateRef.current?.active_question;
@@ -91,7 +125,11 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
           body: JSON.stringify({ question_id: questionId, answer, participant_token: participantToken, hp }),
         });
         if (res.ok) {
-          setAnsweredQuestions((prev) => new Set(prev).add(questionId));
+          setAnsweredQuestions((prev) => {
+            const next = new Set(prev).add(questionId);
+            persistAnsweredIds(surveyId, next);
+            return next;
+          });
           await refresh(); // immediate re-sync; the loop keeps its own cadence
         } else {
           const body = await res.json().catch(() => ({}));
