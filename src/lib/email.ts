@@ -6,6 +6,7 @@ import type { InsuranceFormData } from "@/lib/schemas-insurance";
 import { loadFormDefinition } from "@/lib/form-loader";
 import {
   resolveRecipients,
+  lineItemTotal,
   type FormDefinition,
   type FieldDefinition,
 } from "@/lib/form-definitions";
@@ -194,6 +195,30 @@ function renderFieldCellHtml(field: FieldDefinition, raw: unknown): string {
   if (field.type === "signature") {
     if (typeof raw !== "string" || !raw.startsWith("data:image/")) return "";
     return `<em style="color:#666">Signature captured (see attached PDF)</em>`;
+  }
+  if (field.type === "line_items") {
+    if (!Array.isArray(raw) || raw.length === 0) return "";
+    const allowQty = Boolean(field.allowQuantity);
+    const items = raw
+      .map((r) => {
+        const row = (r ?? {}) as Record<string, unknown>;
+        const desc = escapeHtml(
+          String(row.description ?? "").trim() || "(no description)",
+        );
+        const amt = (Number(row.amount) || 0).toFixed(2);
+        const lt = lineItemTotal(row, allowQty).toFixed(2);
+        const qty = allowQty ? ` &times;${escapeHtml(String(row.quantity ?? 1))}` : "";
+        return `<li>${desc} &mdash; $${amt}${qty} = $${lt}</li>`;
+      })
+      .join("");
+    return `<ul style="margin:0;padding-left:18px">${items}</ul>`;
+  }
+  if (field.type === "total") {
+    // A conditionally hidden total is deleted from the data — skip the row
+    // entirely rather than emailing a $0.00 the submitter never saw.
+    if (raw === undefined || raw === null) return "";
+    const n = Number(raw);
+    return `<strong>$${(Number.isFinite(n) ? n : 0).toFixed(2)}</strong>`;
   }
   const value = formatFieldValue(raw);
   if (!value) return "";

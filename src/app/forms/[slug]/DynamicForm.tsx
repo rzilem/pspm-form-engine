@@ -5,6 +5,7 @@ import { FormEngine } from "@/components/forms/FormEngine";
 import { DynamicField } from "@/components/forms/DynamicField";
 import {
   buildSubmissionSchema,
+  computeFormTotal,
   resolveVisibleFieldIds,
   type FieldType,
   type FormDefinition,
@@ -50,9 +51,14 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
   const defaultValues = useMemo(() => {
     const out: Record<string, unknown> = {};
     for (const f of definition.field_schema) {
-      if (f.type === "section_break" || f.type === "html") continue;
+      if (f.type === "section_break" || f.type === "html" || f.type === "total")
+        continue;
       if (f.type === "consent") out[f.id] = false;
-      else if (f.type === "checkbox_group" || f.type === "file_upload")
+      else if (
+        f.type === "checkbox_group" ||
+        f.type === "file_upload" ||
+        f.type === "line_items"
+      )
         out[f.id] = [];
       else if (f.type === "name") out[f.id] = { first: "", last: "" };
       else if (f.type === "address")
@@ -80,6 +86,15 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
           definition.field_schema,
           values,
         );
+        // Live grand total for any `total` field — recomputed on every change
+        // via the same pure helper the server uses to store the authoritative
+        // value, so the displayed and stored totals always agree. Computed over
+        // VISIBLE fields only, matching the server (which strips conditionally
+        // hidden line_items before its total transform).
+        const computedTotal = computeFormTotal(
+          definition.field_schema.filter((f) => visible.has(f.id)),
+          values,
+        );
         return (
           // @container makes the column count respond to the form's own width
           // (not the viewport), so a narrow embed iframe stays single-column
@@ -99,6 +114,7 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
                       field={field}
                       formSlug={definition.slug}
                       preview={preview}
+                      computedTotal={computedTotal}
                     />
                   </div>
                 ))}

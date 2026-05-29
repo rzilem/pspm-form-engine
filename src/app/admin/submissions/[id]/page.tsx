@@ -53,7 +53,26 @@ function formatValue(v: unknown): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v)) return v.map((x) => String(x)).join(", ");
+  if (Array.isArray(v)) {
+    // line_items: an array of { description, amount, quantity? } objects.
+    // Detected by shape (no field definition here) so it renders readably
+    // instead of "[object Object], [object Object]".
+    if (
+      v.length > 0 &&
+      v.every((x) => x !== null && typeof x === "object" && "amount" in (x as object))
+    ) {
+      return v
+        .map((r) => {
+          const row = r as Record<string, unknown>;
+          const desc = String(row.description ?? "").trim() || "(no description)";
+          const amt = (Number(row.amount) || 0).toFixed(2);
+          const qty = row.quantity !== undefined && row.quantity !== null ? ` ×${row.quantity}` : "";
+          return `${desc} — $${amt}${qty}`;
+        })
+        .join("; ");
+    }
+    return v.map((x) => String(x)).join(", ");
+  }
   if (typeof v === "object") {
     return Object.values(v as Record<string, unknown>)
       .filter((x) => x !== null && x !== undefined && String(x).trim() !== "")

@@ -32,6 +32,8 @@ export const FIELD_TYPES = [
   "signature",
   "section_break",
   "html",
+  "line_items",
+  "total",
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -45,6 +47,34 @@ export const uploadedFileSchema = z.object({
   mimeType: z.string().min(1).max(120),
 });
 export type UploadedFile = z.infer<typeof uploadedFileSchema>;
+
+// One row of a line_items field: a description + a non-negative amount and an
+// optional quantity. Stored as an array on the submission; the grand total is
+// always recomputed server-side (a client-sent total is never trusted).
+export const lineItemValueSchema = z.object({
+  description: z.string().max(300).optional().default(""),
+  // Amounts arrive as free-typed strings from the client. Coerce defensively:
+  // anything non-numeric/negative becomes 0 (rounded to cents) rather than
+  // failing the whole submission. lineItemTotal applies the same leniency, so
+  // the displayed and stored totals stay in lockstep.
+  amount: z.preprocess((v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
+  }, z.number().min(0).max(10_000_000)),
+  // Empty/blank/invalid quantity → undefined (treated as 1 by lineItemTotal),
+  // matching the client so a cleared qty box doesn't zero the line on the
+  // server while showing ×1 in the browser.
+  quantity: z.preprocess((v) => {
+    if (v === "" || v === null || v === undefined) return undefined;
+    const n = Number(v);
+    // Non-numeric/negative → undefined (counts as 1); fractional → floored.
+    // Never returns a value that would fail .int()/.min() and reject the whole
+    // submission — a malformed qty degrades the row, it doesn't kill the form.
+    if (!Number.isFinite(n) || n < 0) return undefined;
+    return Math.min(Math.floor(n), 100_000);
+  }, z.number().int().min(0).max(100_000).optional()),
+});
+export type LineItemValue = z.infer<typeof lineItemValueSchema>;
 
 // ── Field definition (one object per question on the form) ─────────────
 const fieldOptionSchema = z.object({
@@ -69,6 +99,9 @@ export const fieldDefinitionSchema = z.object({
   // Raw HTML body for an "html" display block (rendered sanitized; never a
   // submission value). Ignored by every other field type.
   html: z.string().max(20000).optional(),
+  // line_items: show a per-row quantity column (line total = amount × qty).
+  // Ignored by every other field type.
+  allowQuantity: z.boolean().optional(),
   // Optional validation hints (max length, min/max number, etc.)
   validation: z
     .object({
@@ -86,6 +119,53 @@ export const fieldDefinitionSchema = z.object({
   // Section break uses `label` as the heading and ignores `required`.
 });
 export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
+
+// Amount for a single line: amount × quantity when quantity applies, else
+// amount. Rounded to cents. Shared by the client display + the server store so
+// the two never disagree.
+export function lineItemTotal(
+  item: { amount?: unknown; quantity?: unknown },
+  allowQuantity = true,
+): number {
+  const amountRaw = Number(item?.amount);
+  if (!Number.isFinite(amountRaw) || amountRaw < 0) return 0;
+  // Round the amount to cents BEFORE multiplying — the server stores the
+  // rounded amount, so rounding here too keeps the displayed and stored
+  // line/grand totals identical even for >2-decimal input.
+  const amount = Math.round(amountRaw * 100) / 100;
+  // Quantity only applies when the field's quantity column is enabled. A
+  // client can't inflate the total by posting a quantity to a no-quantity
+  // field — it's ignored here and stripped from the stored row.
+  if (!allowQuantity) return amount;
+  const q = item?.quantity;
+  const qty = q === undefined || q === null || q === "" ? 1 : Number(q);
+  // Floor + clamp exactly as the server schema does (quantity is an integer;
+  // negatives/invalid count as 1) so the displayed and stored totals agree even
+  // when the raw input box holds "1.5" or "-2".
+  const quantity =
+    Number.isFinite(qty) && qty >= 0 ? Math.min(Math.floor(qty), 100_000) : 1;
+  return Math.round(amount * quantity * 100) / 100;
+}
+
+// Grand total = sum of every row across all line_items fields. Stored into each
+// `total` field server-side; also drives the total field's live client display.
+// Pure so buildSubmissionSchema and DynamicField can share it.
+export function computeFormTotal(
+  fields: FieldDefinition[],
+  data: Record<string, unknown>,
+): number {
+  let sum = 0;
+  for (const f of fields) {
+    if (f.type !== "line_items") continue;
+    const rows = data[f.id];
+    if (!Array.isArray(rows)) continue;
+    const allowQuantity = Boolean(f.allowQuantity);
+    for (const row of rows) {
+      sum += lineItemTotal((row ?? {}) as Record<string, unknown>, allowQuantity);
+    }
+  }
+  return Math.round(sum * 100) / 100;
+}
 
 // ── Notification routing (replaces FORM_EMAIL_CONFIG for dynamic forms) ──
 // Recipients can be literal emails or {{field.<id>}} references resolved
@@ -234,8 +314,11 @@ export function buildSubmissionSchema(
   const conditionalLeaves: { field: FieldDefinition; leaf: z.ZodTypeAny }[] = [];
 
   for (const f of fields) {
-    // Display-only blocks carry no submission value.
-    if (f.type === "section_break" || f.type === "html") continue;
+    // Display-only blocks carry no input value. `total` is computed
+    // server-side from the line_items below (a client-sent total is ignored),
+    // so it's skipped here and injected by the transform at the end.
+    if (f.type === "section_break" || f.type === "html" || f.type === "total")
+      continue;
 
     let leaf: z.ZodTypeAny;
 
@@ -264,6 +347,11 @@ export function buildSubmissionSchema(
       }
       case "checkbox_group":
         leaf = z.array(z.string());
+        break;
+      case "line_items":
+        // Each row coerced/validated; the grand total is recomputed in the
+        // transform below, never taken from the client.
+        leaf = z.array(lineItemValueSchema);
         break;
       case "file_upload":
         // Each entry is the descriptor /api/upload returned. Required
@@ -375,7 +463,11 @@ export function buildSubmissionSchema(
     // so that `required: false` doesn't reject blank fields. file_upload
     // (array) and signature (string) need their own required predicates.
     if (requiredWhenPresent && f.type !== "consent" && f.type !== "name" && f.type !== "address") {
-      if (f.type === "file_upload" || f.type === "checkbox_group") {
+      if (
+        f.type === "file_upload" ||
+        f.type === "checkbox_group" ||
+        f.type === "line_items"
+      ) {
         leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
           1,
           `${f.label} is required`,
@@ -449,6 +541,43 @@ export function buildSubmissionSchema(
         }
         return out;
       }) as unknown as z.ZodType<Record<string, unknown>>;
+  }
+
+  // Commerce normalization, server-authoritative. Runs after the conditional
+  // transform (so hidden line_items are already stripped):
+  //   1. Drop `quantity` from rows of line_items fields that don't enable the
+  //      quantity column, so a client can't post a phantom qty to inflate the
+  //      total or pollute the stored/output row.
+  //   2. Recompute every `total` field from the normalized rows. A client-sent
+  //      total was already stripped from the shape; this sets the real value.
+  if (fields.some((f) => f.type === "total" || f.type === "line_items")) {
+    obj = (obj as z.ZodType<Record<string, unknown>>).transform(
+      (data: Record<string, unknown>) => {
+        const out = { ...data };
+        for (const f of fields) {
+          if (f.type !== "line_items" || f.allowQuantity) continue;
+          const rows = out[f.id];
+          if (!Array.isArray(rows)) continue;
+          out[f.id] = rows.map((r) => {
+            const rec = (r ?? {}) as Record<string, unknown>;
+            const { quantity: _q, ...rest } = rec;
+            void _q;
+            return rest;
+          });
+        }
+        const total = computeFormTotal(fields, out);
+        // Only persist a total into a VISIBLE total field — a conditionally
+        // hidden total must not be stored/emailed/rendered when the submitter
+        // never saw it (matches DynamicForm, which hides it client-side).
+        const visibleNow = resolveVisibleFieldIds(fields, out);
+        for (const f of fields) {
+          if (f.type !== "total") continue;
+          if (visibleNow.has(f.id)) out[f.id] = total;
+          else delete out[f.id];
+        }
+        return out;
+      },
+    ) as unknown as z.ZodType<Record<string, unknown>>;
   }
 
   return obj;

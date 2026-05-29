@@ -35,6 +35,8 @@ const TYPE_LABELS: Record<FieldType, string> = {
   signature: "Signature",
   section_break: "Section heading",
   html: "HTML block",
+  line_items: "Line items (priced)",
+  total: "Total (auto-calculated)",
 };
 
 const TYPE_OPTIONS = FIELD_TYPES.map((t) => ({ value: t, label: TYPE_LABELS[t] }));
@@ -236,9 +238,11 @@ function FieldCard({
 }: FieldCardProps) {
   const isSectionBreak = field.type === "section_break";
   const isHtml = field.type === "html";
-  // Display-only blocks (heading, HTML) carry no value, so they hide the
-  // Required toggle and validation.
-  const isDisplayOnly = isSectionBreak || isHtml;
+  const isTotal = field.type === "total";
+  const isLineItems = field.type === "line_items";
+  // Display-only blocks (heading, HTML, auto-calculated total) carry no input
+  // value, so they hide the Required toggle and validation.
+  const isDisplayOnly = isSectionBreak || isHtml || isTotal;
   const showOptions = TYPES_WITH_OPTIONS.has(field.type);
   const showPlaceholder = TYPES_WITH_PLACEHOLDER.has(field.type);
   const showLengthValidation = TYPES_WITH_LENGTH_VALIDATION.has(field.type);
@@ -329,6 +333,25 @@ function FieldCard({
             and event handlers are removed automatically.
           </p>
         </div>
+      )}
+
+      {isLineItems && (
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={field.allowQuantity ?? false}
+            onChange={(e) => onPatch({ allowQuantity: e.target.checked || undefined })}
+            className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+          />
+          Show a quantity column (line total = amount × quantity)
+        </label>
+      )}
+
+      {isTotal && (
+        <p className="text-xs text-muted">
+          Auto-calculated from every line-items field on this form. Read-only for
+          the submitter; the server recomputes it on submit.
+        </p>
       )}
 
       {!isDisplayOnly && (

@@ -32,6 +32,7 @@ import type {
   FormDefinition,
   UploadedFile,
 } from "@/lib/form-definitions";
+import { lineItemTotal } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 
 // PSPM brand palette (mirrors src/index.css custom properties).
@@ -207,6 +208,33 @@ function renderValueCell(
     // doesn't apply here.
     // eslint-disable-next-line jsx-a11y/alt-text
     return <Image src={value} style={styles.signatureImage} />;
+  }
+  if (field.type === "total") {
+    // Hidden conditional total is absent from data — omit the PDF row.
+    if (value === undefined || value === null) return null;
+    const n = Number(value);
+    return <Text>{`$${(Number.isFinite(n) ? n : 0).toFixed(2)}`}</Text>;
+  }
+  if (field.type === "line_items") {
+    const rows = Array.isArray(value) ? value : [];
+    if (rows.length === 0) return null;
+    const allowQty = Boolean(field.allowQuantity);
+    return (
+      <View style={styles.fileList}>
+        {rows.map((r, i) => {
+          const row = (r ?? {}) as Record<string, unknown>;
+          const desc = String(row.description ?? "").trim() || "(no description)";
+          const amt = (Number(row.amount) || 0).toFixed(2);
+          const lt = lineItemTotal(row, allowQty).toFixed(2);
+          const qty = allowQty ? ` x${row.quantity ?? 1}` : "";
+          return (
+            <Text key={i} style={styles.fileItem}>
+              {`• ${desc} — $${amt}${qty} = $${lt}`}
+            </Text>
+          );
+        })}
+      </View>
+    );
   }
   const text = formatValue(value);
   if (text === "" || text === "—") return null;
