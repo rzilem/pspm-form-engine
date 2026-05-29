@@ -59,7 +59,9 @@ export function LiveResults({
   // Numeric families → distribution bars + mean.
   if (aggregate.distribution && (question.type === "rating_scale" || question.type === "star" || question.type === "nps")) {
     const entries = Object.entries(aggregate.distribution).sort((a, b) => Number(a[0]) - Number(b[0]));
-    const max = Math.max(1, ...entries.map(([, c]) => c));
+    // Percent is share of all responses (like the choice bars), not share of the
+    // largest bucket — otherwise a 6/4 split would read 100%/67%.
+    const denom = Math.max(aggregate.total ?? 0, 1);
     return (
       <div className="flex flex-col gap-3">
         <p className={`text-center font-bold text-navy ${large ? "text-4xl" : "text-2xl"}`}>
@@ -67,7 +69,7 @@ export function LiveResults({
           <span className={`font-normal text-muted ${large ? "text-lg" : "text-sm"}`}> avg</span>
         </p>
         {entries.map(([value, count]) => (
-          <Bar key={value} label={value} count={count} pct={Math.round((count / max) * 100)} large={large} />
+          <Bar key={value} label={value} count={count} pct={Math.round((count / denom) * 100)} large={large} />
         ))}
         <p className={`text-center text-muted ${large ? "text-base" : "text-xs"}`}>
           {aggregate.total ?? 0} {(aggregate.total ?? 0) === 1 ? "response" : "responses"}

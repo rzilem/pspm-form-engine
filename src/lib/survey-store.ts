@@ -108,13 +108,19 @@ function normalizeQuestionConfig(q: CreateQuestionInput): { config: Record<strin
         label = `Option ${i + 1}`;
       }
       // Distinct labels can slugify to the same id ("Yes!" / "Yes") — make ids
-      // unique so the UI keys + answer buckets stay distinct.
+      // unique so the UI keys + answer buckets stay distinct. Trim the BASE (not
+      // the whole candidate) before appending the suffix, so a 64-char id can't
+      // truncate back to itself and spin forever.
       if (seen.has(id)) {
         let suffix = 2;
-        let candidate = `${id}_${suffix}`.slice(0, 64);
+        const candidateFor = (n: number) => {
+          const tag = `_${n}`;
+          return `${id.slice(0, 64 - tag.length)}${tag}`;
+        };
+        let candidate = candidateFor(suffix);
         while (seen.has(candidate)) {
           suffix += 1;
-          candidate = `${id}_${suffix}`.slice(0, 64);
+          candidate = candidateFor(suffix);
         }
         id = candidate;
       }
@@ -509,10 +515,13 @@ export async function presenterAction(opts: {
   const nextActiveId =
     newState === "open" ? targetId : survey.active_question_id;
   const nextStatus = newState === "open" && survey.status === "draft" ? "live" : survey.status;
-  // The authoritative vote gate — true only while a question is open. Set in the
-  // same UPDATE as the epoch bump so it flips atomically (closes the late-vote
-  // window between the survey CAS and the survey_questions.state write below).
-  const nextActiveOpen = newState === "open";
+  // The authoritative vote gate for the ACTIVE question. Opening turns it on;
+  // closing/revealing/resetting the ACTIVE question turns it off; acting on a
+  // DIFFERENT (non-active) question (e.g. resetting a past slide) must leave the
+  // currently-open question's gate untouched. Set atomically in the CAS.
+  const actingOnActive = targetId !== null && targetId === survey.active_question_id;
+  const nextActiveOpen =
+    newState === "open" ? true : actingOnActive ? false : survey.active_question_open;
 
   // Apply the survey CAS AND the question-state writes in ONE transaction (RPC),
   // so a concurrent status change (End poll) can't interleave between the CAS and
