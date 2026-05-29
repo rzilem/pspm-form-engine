@@ -613,6 +613,18 @@ export interface Database {
         Args: { p_question_id: string };
         Returns: unknown;
       };
+      submit_survey_response: {
+        Args: {
+          p_survey_id: string;
+          p_question_id: string;
+          p_answer: Record<string, unknown>;
+          p_participant_token: string | null;
+          p_epoch: number;
+          p_ip: string | null;
+          p_user_agent: string | null;
+        };
+        Returns: string;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

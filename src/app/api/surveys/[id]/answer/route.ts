@@ -39,7 +39,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: "Submission rejected." }, { status: 400 });
   }
 
-  const ip = request.headers.get("x-forwarded-for") ?? request.headers.get("cf-connecting-ip") ?? null;
+  // X-Forwarded-For is a comma-separated chain (client, proxy1, …); take the
+  // first hop only — the full string is not a valid INET and would 500 the write.
+  const xff = request.headers.get("x-forwarded-for");
+  const ip =
+    (xff ? xff.split(",")[0]?.trim() : null) ||
+    request.headers.get("cf-connecting-ip") ||
+    null;
   const userAgent = request.headers.get("user-agent") ?? null;
 
   try {

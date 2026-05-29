@@ -16,6 +16,8 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
+  // Honeypot: real users never see/fill this; bots auto-complete every input.
+  const [hp, setHp] = useState("");
 
   const stateRef = useRef<SurveyStateResponse | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -80,7 +82,7 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
         const res = await fetch(`/api/surveys/${surveyId}/answer`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question_id: questionId, answer, participant_token: participantToken }),
+          body: JSON.stringify({ question_id: questionId, answer, participant_token: participantToken, hp }),
         });
         if (res.ok) {
           setAnsweredQuestions((prev) => new Set(prev).add(questionId));
@@ -95,7 +97,7 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
         setSubmitting(false);
       }
     },
-    [surveyId, participantToken, refresh],
+    [surveyId, participantToken, hp, refresh],
   );
 
   const active = state?.active_question ?? null;
@@ -108,6 +110,18 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 py-6">
+        {/* Honeypot — hidden from real users, auto-filled by bots. */}
+        <input
+          type="text"
+          name="website"
+          tabIndex={-1}
+          autoComplete="off"
+          aria-hidden="true"
+          value={hp}
+          onChange={(e) => setHp(e.target.value)}
+          className="absolute h-0 w-0 overflow-hidden border-0 p-0 opacity-0"
+          style={{ position: "absolute", left: "-9999px" }}
+        />
         {connError && (
           <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800">Reconnecting…</p>
         )}

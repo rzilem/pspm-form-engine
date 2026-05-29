@@ -202,19 +202,26 @@ BEGIN
     ) t;
 
   ELSIF q.type = 'word_cloud' THEN
-    SELECT jsonb_build_object(
-      'type', 'word_cloud',
-      'terms', COALESCE(jsonb_object_agg(word, cnt) FILTER (WHERE word IS NOT NULL), '{}'::jsonb)
-    ) INTO result
-    FROM (
-      SELECT lower(trim(w)) AS word, count(*) AS cnt
-      FROM survey_responses sr,
-           LATERAL jsonb_array_elements_text(sr.answer->'words') AS w
-      WHERE sr.question_id = p_question_id AND trim(w) <> ''
-      GROUP BY lower(trim(w))
-      ORDER BY count(*) DESC
-      LIMIT 100
-    ) t;
+    -- Free text on a public screen is a heckler's gift. Default moderation is
+    -- pre_approve; until the M2 approval queue exists, only an explicit
+    -- moderation='live' question exposes terms publicly. Otherwise hide them.
+    IF COALESCE(q.config->>'moderation', 'pre_approve') <> 'live' THEN
+      result := jsonb_build_object('hidden', true, 'reason', 'moderation_pending');
+    ELSE
+      SELECT jsonb_build_object(
+        'type', 'word_cloud',
+        'terms', COALESCE(jsonb_object_agg(word, cnt) FILTER (WHERE word IS NOT NULL), '{}'::jsonb)
+      ) INTO result
+      FROM (
+        SELECT lower(trim(w)) AS word, count(*) AS cnt
+        FROM survey_responses sr,
+             LATERAL jsonb_array_elements_text(sr.answer->'words') AS w
+        WHERE sr.question_id = p_question_id AND trim(w) <> ''
+        GROUP BY lower(trim(w))
+        ORDER BY count(*) DESC
+        LIMIT 100
+      ) t;
+    END IF;
 
   ELSE
     -- open_text: count only. Moderated text is served by a separate
@@ -230,3 +237,69 @@ $$;
 
 REVOKE ALL ON FUNCTION public.survey_question_aggregate(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.survey_question_aggregate(UUID) TO anon, service_role;
+
+-- ── Atomic answer write ───────────────────────────────────────────────────────
+-- Inserts (or change-vote upserts) a response ONLY when the question is still
+-- open and the survey is live — checked in the same statement as the write, so
+-- a presenter closing/advancing mid-flight can't let a late vote land. Also the
+-- only place ON CONFLICT can name the partial-index predicate (PostgREST's
+-- column-only conflict target can't). Returns 'ok' or 'closed'.
+-- Called server-side via the service-role client (route validates the answer
+-- shape first), so EXECUTE is granted to service_role only.
+CREATE OR REPLACE FUNCTION public.submit_survey_response(
+  p_survey_id         UUID,
+  p_question_id       UUID,
+  p_answer            JSONB,
+  p_participant_token TEXT,
+  p_epoch             BIGINT,
+  p_ip                TEXT,
+  p_user_agent        TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  n          INTEGER;
+  v_ip       INET;
+BEGIN
+  -- Guarded INET cast: a malformed/loopback-chain value must not 500 the write.
+  IF p_ip IS NOT NULL AND p_ip ~ '^[0-9a-fA-F:.]+$' THEN
+    BEGIN
+      v_ip := p_ip::inet;
+    EXCEPTION WHEN others THEN
+      v_ip := NULL;
+    END;
+  END IF;
+
+  INSERT INTO survey_responses
+    (survey_id, question_id, answer, participant_token, state_epoch_at_answer, ip_address, user_agent)
+  SELECT p_survey_id, p_question_id, p_answer, p_participant_token, p_epoch, v_ip, p_user_agent
+  WHERE EXISTS (
+    SELECT 1
+    FROM survey_questions q
+    JOIN surveys s ON s.id = q.survey_id
+    WHERE q.id = p_question_id
+      AND q.survey_id = p_survey_id
+      AND q.state = 'open'
+      AND s.status = 'live'
+  )
+  ON CONFLICT (question_id, participant_token) WHERE participant_token IS NOT NULL
+  DO UPDATE SET
+    answer = EXCLUDED.answer,
+    state_epoch_at_answer = EXCLUDED.state_epoch_at_answer,
+    ip_address = EXCLUDED.ip_address,
+    user_agent = EXCLUDED.user_agent,
+    updated_at = now();
+
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n = 0 THEN
+    RETURN 'closed';
+  END IF;
+  RETURN 'ok';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.submit_survey_response(UUID, UUID, JSONB, TEXT, BIGINT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.submit_survey_response(UUID, UUID, JSONB, TEXT, BIGINT, TEXT, TEXT) TO service_role;

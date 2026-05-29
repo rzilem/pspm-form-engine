@@ -370,33 +370,26 @@ export async function recordAnswer(opts: {
     };
   }
 
-  const row = {
-    survey_id: opts.surveyId,
-    question_id: opts.questionId,
-    answer: parsed.data as Record<string, unknown>,
-    participant_token: opts.participantToken,
-    state_epoch_at_answer: survey.state_epoch,
-    ip_address: opts.ip,
-    user_agent: opts.userAgent,
-    updated_at: new Date().toISOString(),
-  };
+  // Atomic gated write: the RPC re-checks open+live in the SAME statement as the
+  // insert (so a presenter closing mid-flight can't accept a late vote) and is
+  // the only place ON CONFLICT can name the partial-index predicate for the
+  // one-per-device change-vote upsert. Returns 'closed' when the guard fails.
+  const { data: rpcResult, error: rpcErr } = await supabase.rpc("submit_survey_response", {
+    p_survey_id: opts.surveyId,
+    p_question_id: opts.questionId,
+    p_answer: parsed.data as Record<string, unknown>,
+    p_participant_token: opts.participantToken,
+    p_epoch: survey.state_epoch,
+    p_ip: opts.ip,
+    p_user_agent: opts.userAgent,
+  });
 
-  // One-per-device when a token is present → UPSERT = change-vote. Anonymous
-  // (no token) just inserts.
-  if (opts.participantToken) {
-    const { error: upsertErr } = await supabase
-      .from("survey_responses")
-      .upsert(row, { onConflict: "question_id,participant_token" });
-    if (upsertErr) {
-      logger.error("recordAnswer upsert failed", { error: upsertErr.message });
-      return { ok: false, status: 500, body: { error: "Failed to record answer" } };
-    }
-  } else {
-    const { error: insertErr } = await supabase.from("survey_responses").insert(row);
-    if (insertErr) {
-      logger.error("recordAnswer insert failed", { error: insertErr.message });
-      return { ok: false, status: 500, body: { error: "Failed to record answer" } };
-    }
+  if (rpcErr) {
+    logger.error("submit_survey_response rpc failed", { error: rpcErr.message });
+    return { ok: false, status: 500, body: { error: "Failed to record answer" } };
+  }
+  if (rpcResult === "closed") {
+    return { ok: false, status: 409, body: { error: "Voting just closed for this question", state_epoch: survey.state_epoch } };
   }
 
   return { ok: true, status: 200, body: { ok: true, state_epoch: survey.state_epoch, status: survey.status } };
