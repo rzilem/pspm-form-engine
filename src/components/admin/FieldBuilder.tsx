@@ -113,6 +113,20 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
     (index: number, patch: Partial<FieldDefinition>) => {
       const prev = value[index];
       const next = value.map((f, i) => (i === index ? { ...f, ...patch } : f));
+      // Leaving line_items: drop its mode/preset/quantity config so a stale,
+      // possibly-incomplete preset row can't block saving the new field type.
+      if (
+        patch.type !== undefined &&
+        patch.type !== "line_items" &&
+        prev?.type === "line_items"
+      ) {
+        next[index] = {
+          ...next[index],
+          lineItemMode: undefined,
+          presetItems: undefined,
+          allowQuantity: undefined,
+        };
+      }
       const updated = next[index];
       // Only scalar fields can be triggers (the resolver compares String(value)).
       // If this edit ACTUALLY changes the type from a trigger-capable one to a
@@ -336,15 +350,44 @@ function FieldCard({
       )}
 
       {isLineItems && (
-        <label className="flex items-center gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={field.allowQuantity ?? false}
-            onChange={(e) => onPatch({ allowQuantity: e.target.checked || undefined })}
-            className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+        <div className="space-y-3 rounded-[8px] border border-border px-3 py-3">
+          <SelectField
+            label="Line item mode"
+            value={field.lineItemMode ?? "free"}
+            onChange={(e) =>
+              onPatch(
+                e.target.value === "preset"
+                  ? { lineItemMode: "preset" }
+                  : // Returning to free entry: clear presetItems so a stale /
+                    // incomplete preset row can't fail schema validation on a
+                    // field the admin no longer wants to be preset.
+                    { lineItemMode: undefined, presetItems: undefined },
+              )
+            }
+            options={[
+              { value: "free", label: "Free entry — submitter types description + amount" },
+              { value: "preset", label: "Preset items — you set prices, submitter picks quantities" },
+            ]}
           />
-          Show a quantity column (line total = amount × quantity)
-        </label>
+          {(field.lineItemMode ?? "free") === "preset" ? (
+            <PresetItemsEditor
+              items={field.presetItems ?? []}
+              onChange={(presetItems) =>
+                onPatch({ presetItems: presetItems.length ? presetItems : undefined })
+              }
+            />
+          ) : (
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={field.allowQuantity ?? false}
+                onChange={(e) => onPatch({ allowQuantity: e.target.checked || undefined })}
+                className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+              />
+              Show a quantity column (line total = amount × quantity)
+            </label>
+          )}
+        </div>
       )}
 
       {isTotal && (
@@ -562,6 +605,62 @@ function OptionsEditor({ options, onChange }: OptionsEditorProps) {
       ))}
       <Button type="button" variant="outline" size="sm" onClick={addOption}>
         + Add option
+      </Button>
+    </div>
+  );
+}
+
+type PresetItem = NonNullable<FieldDefinition["presetItems"]>[number];
+
+function PresetItemsEditor({
+  items,
+  onChange,
+}: {
+  items: PresetItem[];
+  onChange: (next: PresetItem[]) => void;
+}) {
+  const update = (i: number, patch: Partial<PresetItem>) =>
+    onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const remove = (i: number) => onChange(items.filter((_, idx) => idx !== i));
+  const add = () => onChange([...items, { label: "", price: 0 }]);
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-foreground">Preset items</p>
+      {items.length === 0 && (
+        <p className="text-xs text-muted">No items yet. Add at least one priced item.</p>
+      )}
+      {items.map((it, i) => (
+        <div key={i} className="flex items-end gap-2">
+          <TextInput
+            label="Label"
+            value={it.label}
+            onChange={(e) => update(i, { label: e.target.value })}
+            className="flex-1"
+          />
+          <TextInput
+            label="Price ($)"
+            type="number"
+            value={it.price}
+            onChange={(e) => {
+              const n = parseFloat(e.target.value);
+              update(i, { price: Number.isFinite(n) && n >= 0 ? n : 0 });
+            }}
+            className="w-28"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => remove(i)}
+            aria-label="Remove item"
+            className="!border-error !text-error hover:!bg-error-light mb-0.5"
+          >
+            ✕
+          </Button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={add}>
+        + Add item
       </Button>
     </div>
   );

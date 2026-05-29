@@ -109,6 +109,101 @@ export function DynamicField({
     );
   }
 
+  if (field.type === "line_items" && field.lineItemMode === "preset") {
+    const presets = field.presetItems ?? [];
+    return (
+      <Controller
+        name={field.id}
+        control={control}
+        defaultValue={[]}
+        render={({ field: controllerField }) => {
+          const rows: Array<Record<string, unknown>> = Array.isArray(
+            controllerField.value,
+          )
+            ? (controllerField.value as Array<Record<string, unknown>>)
+            : [];
+          const qtyFor = (idx: number) => {
+            const row = rows.find((r) => Number(r.presetIndex) === idx);
+            return row ? String(row.quantity ?? "") : "";
+          };
+          const setQty = (idx: number, raw: string) => {
+            const others = rows.filter((r) => Number(r.presetIndex) !== idx);
+            const n = parseInt(raw, 10);
+            if (!raw || !Number.isFinite(n) || n <= 0) {
+              controllerField.onChange(others);
+              return;
+            }
+            const p = presets[idx];
+            controllerField.onChange([
+              ...others,
+              {
+                presetIndex: idx,
+                description: p?.label ?? "",
+                amount: p?.price ?? 0,
+                quantity: n,
+              },
+            ]);
+          };
+          // Preset prices come from the field config; quantity always applies.
+          const subtotal = rows.reduce((s, r) => s + lineItemTotal(r, true), 0);
+          return (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-sm font-medium text-foreground">
+                {field.label}
+                {field.required && (
+                  <span className="text-error ml-0.5" aria-hidden="true">*</span>
+                )}
+              </legend>
+              {field.helpText && <p className="text-xs text-muted">{field.helpText}</p>}
+              {presets.length === 0 && (
+                <p className="text-xs text-muted">No items configured.</p>
+              )}
+              <div className="flex flex-col gap-2">
+                {presets.map((p, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-3 rounded-[8px] border border-border bg-white px-3 py-2"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-foreground truncate">{p.label}</p>
+                      <p className="text-xs text-muted">
+                        {formatMoney(Number(p.price) || 0)} each
+                      </p>
+                    </div>
+                    <label className="text-xs text-muted">Qty</label>
+                    <input
+                      aria-label={`${p.label} quantity`}
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={qtyFor(idx)}
+                      placeholder="0"
+                      onChange={(e) => setQty(idx, e.target.value)}
+                      className="w-16 shrink-0 rounded-[8px] border border-border bg-white px-2 py-2 text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-end pt-1">
+                <span className="text-sm text-muted">
+                  Subtotal:{" "}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {formatMoney(subtotal)}
+                  </span>
+                </span>
+              </div>
+              {error && (
+                <p className="text-xs text-error" role="alert">
+                  {error.message}
+                </p>
+              )}
+            </fieldset>
+          );
+        }}
+      />
+    );
+  }
+
   if (field.type === "line_items") {
     const showQty = Boolean(field.allowQuantity);
     // Rows are stored leniently while editing (amount/quantity as raw strings);

@@ -67,12 +67,18 @@ export const lineItemValueSchema = z.object({
   quantity: z.preprocess((v) => {
     if (v === "" || v === null || v === undefined) return undefined;
     const n = Number(v);
-    // Non-numeric/negative → undefined (counts as 1); fractional → floored.
-    // Never returns a value that would fail .int()/.min() and reject the whole
-    // submission — a malformed qty degrades the row, it doesn't kill the form.
-    if (!Number.isFinite(n) || n < 0) return undefined;
+    // Blank → undefined (free mode counts that as 1). NEGATIVE → 0 (not
+    // undefined) so it stays distinguishable and gets dropped/zeroed rather
+    // than silently defaulting to 1 — closes a required-preset bypass via
+    // {quantity:-1}. Fractional → floored. Never rejects the whole submission.
+    if (!Number.isFinite(n)) return undefined;
+    if (n < 0) return 0;
     return Math.min(Math.floor(n), 100_000);
   }, z.number().int().min(0).max(100_000).optional()),
+  // Preset mode only: which preset item this row selects. The server re-derives
+  // description + amount from the field's presetItems[presetIndex] (a client
+  // can never set its own price), then strips this key from the stored row.
+  presetIndex: z.coerce.number().int().min(0).optional(),
 });
 export type LineItemValue = z.infer<typeof lineItemValueSchema>;
 
@@ -102,6 +108,27 @@ export const fieldDefinitionSchema = z.object({
   // line_items: show a per-row quantity column (line total = amount × qty).
   // Ignored by every other field type.
   allowQuantity: z.boolean().optional(),
+  // line_items: "free" (default) lets submitters type description + amount;
+  // "preset" offers a fixed list of admin-priced items (submitters only choose
+  // quantities, never the price). Quantity always applies in preset mode.
+  lineItemMode: z.enum(["free", "preset"]).optional(),
+  presetItems: z
+    .array(
+      z.object({
+        // No min length here — a leftover/in-progress preset row must not block
+        // saving a field that isn't a preset line_items field. The refine below
+        // enforces non-empty labels only when the field actually IS one.
+        label: z.string().max(200),
+        // Normalize to cents so the displayed (toFixed 2) and computed/stored
+        // prices never diverge on a >2-decimal entry like 0.015.
+        price: z.preprocess((v) => {
+          const n = Number(v);
+          return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
+        }, z.number().min(0).max(10_000_000)),
+      }),
+    )
+    .max(100)
+    .optional(),
   // Optional validation hints (max length, min/max number, etc.)
   validation: z
     .object({
@@ -117,7 +144,21 @@ export const fieldDefinitionSchema = z.object({
   // Replaces Gravity Forms' Conditional Logic.
   conditionalOn: conditionalSchema.optional(),
   // Section break uses `label` as the heading and ignores `required`.
-});
+}).refine(
+  // Only enforce preset rules when the field IS a preset line_items field — a
+  // preset field needs ≥1 item, each with a non-blank label. For any other
+  // field type, leftover presetItems are ignored (so changing a field's type
+  // away from line_items never blocks the save).
+  (d) => {
+    if (d.type !== "line_items" || d.lineItemMode !== "preset") return true;
+    const items = d.presetItems ?? [];
+    return items.length > 0 && items.every((it) => it.label.trim() !== "");
+  },
+  {
+    message: "Preset line items need at least one item, each with a label",
+    path: ["presetItems"],
+  },
+);
 export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
 
 // Amount for a single line: amount × quantity when quantity applies, else
@@ -137,13 +178,19 @@ export function lineItemTotal(
   // client can't inflate the total by posting a quantity to a no-quantity
   // field — it's ignored here and stripped from the stored row.
   if (!allowQuantity) return amount;
+  // Resolve quantity EXACTLY as the schema preprocess does so the displayed
+  // and stored totals agree: blank/non-numeric → 1, negative → 0, otherwise
+  // floor + clamp to 100k.
   const q = item?.quantity;
-  const qty = q === undefined || q === null || q === "" ? 1 : Number(q);
-  // Floor + clamp exactly as the server schema does (quantity is an integer;
-  // negatives/invalid count as 1) so the displayed and stored totals agree even
-  // when the raw input box holds "1.5" or "-2".
-  const quantity =
-    Number.isFinite(qty) && qty >= 0 ? Math.min(Math.floor(qty), 100_000) : 1;
+  let quantity: number;
+  if (q === undefined || q === null || q === "") {
+    quantity = 1;
+  } else {
+    const n = Number(q);
+    if (!Number.isFinite(n)) quantity = 1;
+    else if (n < 0) quantity = 0;
+    else quantity = Math.min(Math.floor(n), 100_000);
+  }
   return Math.round(amount * quantity * 100) / 100;
 }
 
@@ -159,9 +206,11 @@ export function computeFormTotal(
     if (f.type !== "line_items") continue;
     const rows = data[f.id];
     if (!Array.isArray(rows)) continue;
-    const allowQuantity = Boolean(f.allowQuantity);
+    // Quantity always applies in preset mode (qty of the chosen item); in free
+    // mode only when the admin enabled the quantity column.
+    const useQty = f.lineItemMode === "preset" || Boolean(f.allowQuantity);
     for (const row of rows) {
-      sum += lineItemTotal((row ?? {}) as Record<string, unknown>, allowQuantity);
+      sum += lineItemTotal((row ?? {}) as Record<string, unknown>, useQty);
     }
   }
   return Math.round(sum * 100) / 100;
@@ -543,6 +592,57 @@ export function buildSubmissionSchema(
       }) as unknown as z.ZodType<Record<string, unknown>>;
   }
 
+  // A required line_items field must have at least one MEANINGFUL row — the
+  // leaf's .min(1) only proves the array is non-empty. Preset: a row with a
+  // valid in-range index and qty > 0. Free: a row with a positive amount or a
+  // non-blank description. Re-checked here (over visible fields) so an
+  // all-bogus or all-blank payload can't bypass the requirement.
+  if (fields.some((f) => f.type === "line_items" && f.required)) {
+    obj = (obj as unknown as z.ZodObject<z.ZodRawShape>).superRefine(
+      (data: Record<string, unknown>, ctx: z.RefinementCtx) => {
+        const visible = resolveVisibleFieldIds(fields, data);
+        for (const f of fields) {
+          if (f.type !== "line_items" || !f.required || !visible.has(f.id))
+            continue;
+          const list = Array.isArray(data[f.id])
+            ? (data[f.id] as unknown[])
+            : [];
+          let meaningful = 0;
+          if (f.lineItemMode === "preset") {
+            const presets = f.presetItems ?? [];
+            meaningful = list.filter((r) => {
+              const rec = (r as Record<string, unknown>) ?? {};
+              const idx = Number(rec.presetIndex);
+              if (!(Number.isInteger(idx) && idx >= 0 && idx < presets.length))
+                return false;
+              // Preset mode needs an explicit positive quantity — missing/blank
+              // is NOT a selection (unlike free mode where blank counts as 1).
+              const q =
+                rec.quantity === undefined || rec.quantity === null
+                  ? 0
+                  : Number(rec.quantity);
+              return Number.isFinite(q) && q > 0;
+            }).length;
+          } else {
+            meaningful = list.filter((r) => {
+              const rec = (r as Record<string, unknown>) ?? {};
+              const amt = Number(rec.amount);
+              const desc = String(rec.description ?? "").trim();
+              return (Number.isFinite(amt) && amt > 0) || desc !== "";
+            }).length;
+          }
+          if (meaningful === 0) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [f.id],
+              message: `${f.label} is required`,
+            });
+          }
+        }
+      },
+    ) as unknown as z.ZodType<Record<string, unknown>>;
+  }
+
   // Commerce normalization, server-authoritative. Runs after the conditional
   // transform (so hidden line_items are already stripped):
   //   1. Drop `quantity` from rows of line_items fields that don't enable the
@@ -555,15 +655,55 @@ export function buildSubmissionSchema(
       (data: Record<string, unknown>) => {
         const out = { ...data };
         for (const f of fields) {
-          if (f.type !== "line_items" || f.allowQuantity) continue;
+          if (f.type !== "line_items") continue;
           const rows = out[f.id];
           if (!Array.isArray(rows)) continue;
-          out[f.id] = rows.map((r) => {
-            const rec = (r ?? {}) as Record<string, unknown>;
-            const { quantity: _q, ...rest } = rec;
-            void _q;
-            return rest;
-          });
+          if (f.lineItemMode === "preset") {
+            // Re-derive description + amount from the admin presets by index —
+            // a client can never set its own price. Drop rows whose preset
+            // index is out of range, and strip the index from storage.
+            const presets = f.presetItems ?? [];
+            out[f.id] = rows
+              .map((r) => {
+                const rec = (r ?? {}) as Record<string, unknown>;
+                const idx = Number(rec.presetIndex);
+                const preset = Number.isInteger(idx) ? presets[idx] : undefined;
+                // Drop bogus-index AND zero/negative-quantity rows (the UI
+                // treats qty<=0 as unselected) so they don't clutter storage
+                // or output with $0 lines.
+                // Missing/blank quantity is not a selection in preset mode.
+                const q =
+                  rec.quantity === undefined || rec.quantity === null
+                    ? 0
+                    : Number(rec.quantity);
+                if (!preset || !Number.isFinite(q) || q <= 0) return null;
+                // Keep presetIndex: buildSubmissionSchema also runs in the
+                // client zodResolver, and its transformed output is what gets
+                // POSTed — stripping the index here would leave the server
+                // unable to re-derive/validate it. description + amount are
+                // re-derived (server-authoritative); quantity + index pass
+                // through.
+                const { description: _d, amount: _a, ...rest } = rec;
+                void _d;
+                void _a;
+                return {
+                  ...rest,
+                  description: preset.label,
+                  // Round here too — don't rely on the field def having been
+                  // re-parsed through the price-normalizing schema.
+                  amount: Math.round((Number(preset.price) || 0) * 100) / 100,
+                };
+              })
+              .filter((r): r is NonNullable<typeof r> => r !== null);
+          } else if (!f.allowQuantity) {
+            // Free mode without a quantity column → strip phantom quantity.
+            out[f.id] = rows.map((r) => {
+              const rec = (r ?? {}) as Record<string, unknown>;
+              const { quantity: _q, ...rest } = rec;
+              void _q;
+              return rest;
+            });
+          }
         }
         const total = computeFormTotal(fields, out);
         // Only persist a total into a VISIBLE total field — a conditionally

@@ -218,15 +218,16 @@ function renderValueCell(
   if (field.type === "line_items") {
     const rows = Array.isArray(value) ? value : [];
     if (rows.length === 0) return null;
-    const allowQty = Boolean(field.allowQuantity);
+    const useQty =
+      field.lineItemMode === "preset" || Boolean(field.allowQuantity);
     return (
       <View style={styles.fileList}>
         {rows.map((r, i) => {
           const row = (r ?? {}) as Record<string, unknown>;
           const desc = String(row.description ?? "").trim() || "(no description)";
           const amt = (Number(row.amount) || 0).toFixed(2);
-          const lt = lineItemTotal(row, allowQty).toFixed(2);
-          const qty = allowQty ? ` x${row.quantity ?? 1}` : "";
+          const lt = lineItemTotal(row, useQty).toFixed(2);
+          const qty = useQty ? ` x${row.quantity ?? 1}` : "";
           return (
             <Text key={i} style={styles.fileItem}>
               {`• ${desc} — $${amt}${qty} = $${lt}`}
