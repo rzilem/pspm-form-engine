@@ -39,8 +39,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     : await canPresentSurvey(request, id, presenterToken);
   if (!authed) return surveyUnauthorized();
 
-  const updated = await setSurveyStatus(id, parsed.data.status);
+  // Non-archive (presenter-token) transitions guard against a concurrent archive
+  // landing between the auth read and this write.
+  const updated = await setSurveyStatus(id, parsed.data.status, { guardNotArchived: !touchesArchive });
   if (!updated) {
+    if (!touchesArchive) {
+      // Guard tripped — the survey was archived concurrently.
+      return Response.json({ error: "Survey was archived" }, { status: 409 });
+    }
     logger.error("status route: update failed", { surveyId: id });
     return Response.json({ error: "Update failed" }, { status: 500 });
   }

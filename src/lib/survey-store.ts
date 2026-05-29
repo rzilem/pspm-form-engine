@@ -588,7 +588,14 @@ export async function verifyPresenterToken(surveyId: string, token: string | nul
 }
 
 // ── Survey status (open/close the whole thing) ───────────────────────────────
-export async function setSurveyStatus(surveyId: string, status: "draft" | "live" | "closed" | "archived"): Promise<Survey | null> {
+// guardNotArchived: when true (non-management/presenter-token callers), the
+// UPDATE only applies if the row is still not archived — closes the TOCTOU where
+// a presenter-token transition could land after a manager archives and revive it.
+export async function setSurveyStatus(
+  surveyId: string,
+  status: "draft" | "live" | "closed" | "archived",
+  opts: { guardNotArchived?: boolean } = {},
+): Promise<Survey | null> {
   const supabase = getSupabaseAdmin();
   const patch: Record<string, unknown> = {
     status,
@@ -603,12 +610,10 @@ export async function setSurveyStatus(surveyId: string, status: "draft" | "live"
     patch.state_epoch = await nextEpoch(surveyId);
   }
 
-  const { data, error } = await supabase
-    .from("surveys")
-    .update(patch)
-    .eq("id", surveyId)
-    .select("*")
-    .maybeSingle();
+  let query = supabase.from("surveys").update(patch).eq("id", surveyId);
+  if (opts.guardNotArchived) query = query.neq("status", "archived");
+
+  const { data, error } = await query.select("*").maybeSingle();
   if (error) {
     logger.error("setSurveyStatus failed", { error: error.message });
     return null;

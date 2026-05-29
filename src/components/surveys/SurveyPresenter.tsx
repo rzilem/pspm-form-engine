@@ -22,6 +22,7 @@ export function SurveyPresenter({
   canControl: boolean;
 }) {
   const [state, setState] = useState<SurveyStateResponse | null>(null);
+  const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const stateRef = useRef<SurveyStateResponse | null>(null);
@@ -35,6 +36,14 @@ export function SurveyPresenter({
         const data = (await res.json()) as SurveyStateResponse;
         stateRef.current = data;
         setState(data);
+      } else if (res.status === 404) {
+        // Archived/removed mid-session — terminal. Stop polling and clear the
+        // screen instead of showing stale prompt/results.
+        stopped.current = true;
+        if (timer.current) clearTimeout(timer.current);
+        stateRef.current = null;
+        setState(null);
+        setGone(true);
       }
     } catch {
       /* keep last-good on screen */
@@ -107,11 +116,17 @@ export function SurveyPresenter({
 
   const active = state?.active_question ?? null;
   const ended = state?.status === "closed";
+  const terminal = ended || gone;
 
   return (
     <div className="flex min-h-screen flex-col bg-navy text-white">
       <main className="flex flex-1 flex-col items-center justify-center px-6 py-8">
-        {ended ? (
+        {gone ? (
+          <div className="text-center">
+            <h1 className="text-4xl font-bold">Poll unavailable</h1>
+            <p className="mt-2 text-white/70">This poll has been archived or removed.</p>
+          </div>
+        ) : ended ? (
           <div className="text-center">
             <h1 className="text-4xl font-bold">Poll ended</h1>
             <p className="mt-2 text-white/70">Thanks for participating.</p>
@@ -137,7 +152,7 @@ export function SurveyPresenter({
       </main>
 
       {/* Persistent join strip */}
-      {!ended && active && (
+      {!terminal && active && (
         <div className="flex items-center justify-center gap-4 bg-black/20 px-6 py-3 text-sm">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qrUrl} alt="Join QR code" className="h-16 w-16 rounded bg-white p-1" />
@@ -149,8 +164,8 @@ export function SurveyPresenter({
         </div>
       )}
 
-      {/* Controls — hidden once the poll has ended (closed is terminal). */}
-      {canControl && !ended && (
+      {/* Controls — hidden once the poll is terminal (ended or archived). */}
+      {canControl && !terminal && (
         <div className="border-t border-white/10 bg-black/30 px-4 py-3">
           {notice && <p className="mb-2 text-center text-xs text-amber-300">{notice}</p>}
           <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-2">
@@ -171,7 +186,7 @@ export function SurveyPresenter({
           </div>
         </div>
       )}
-      {!canControl && (
+      {!canControl && !terminal && (
         <div className="bg-black/30 px-4 py-2 text-center text-xs text-white/50">
           View-only — presenter controls need a valid presenter link.
         </div>
