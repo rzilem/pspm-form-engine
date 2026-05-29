@@ -32,7 +32,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       active_question: active
         ? {
             ...toPublicQuestion(active),
-            voting_open: active.state === "open" && survey.status === "live",
+            // Authoritative gate is the survey row (set atomically in the CAS),
+            // not survey_questions.state which lags a statement behind.
+            voting_open:
+              survey.active_question_open &&
+              survey.active_question_id === active.id &&
+              survey.status === "live",
           }
         : null,
       results,

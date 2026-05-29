@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS surveys (
   -- Monotonic sync token. Bumped on EVERY presenter action so phones detect a
   -- change (new slide / closed / revealed / reset) within one poll interval.
   state_epoch         BIGINT NOT NULL DEFAULT 0,
+  -- Whether active_question_id is currently accepting votes. Set in the SAME
+  -- UPDATE as the epoch bump so it flips atomically with every presenter action;
+  -- THIS (not survey_questions.state, which is updated a statement later for
+  -- display) is the authoritative accept/reject gate in submit_survey_response.
+  active_question_open BOOLEAN NOT NULL DEFAULT false,
   response_mode       TEXT NOT NULL DEFAULT 'one_per_device'
                         CHECK (response_mode IN ('anonymous','one_per_device')),
   recaptcha_required  BOOLEAN NOT NULL DEFAULT false,
@@ -277,12 +282,15 @@ BEGIN
     (survey_id, question_id, answer, participant_token, state_epoch_at_answer, ip_address, user_agent)
   SELECT p_survey_id, p_question_id, p_answer, p_participant_token, p_epoch, v_ip, p_user_agent
   WHERE EXISTS (
+    -- Gate on the SURVEY row only. active_question_id + active_question_open are
+    -- set atomically in the presenter CAS, so the instant the presenter advances
+    -- or closes, votes for the prior question fail here — no window where the
+    -- survey has moved on but survey_questions.state hasn't caught up yet.
     SELECT 1
-    FROM survey_questions q
-    JOIN surveys s ON s.id = q.survey_id
-    WHERE q.id = p_question_id
-      AND q.survey_id = p_survey_id
-      AND q.state = 'open'
+    FROM surveys s
+    WHERE s.id = p_survey_id
+      AND s.active_question_id = p_question_id
+      AND s.active_question_open = true
       AND s.status = 'live'
   )
   ON CONFLICT (question_id, participant_token) WHERE participant_token IS NOT NULL

@@ -444,6 +444,7 @@ export interface Database {
           results_visibility: string;
           active_question_id: string | null;
           state_epoch: number;
+          active_question_open: boolean;
           response_mode: string;
           recaptcha_required: boolean;
           room_code: string | null;
@@ -463,6 +464,7 @@ export interface Database {
           results_visibility?: string;
           active_question_id?: string | null;
           state_epoch?: number;
+          active_question_open?: boolean;
           response_mode?: string;
           recaptcha_required?: boolean;
           room_code?: string | null;
@@ -482,6 +484,7 @@ export interface Database {
           results_visibility?: string;
           active_question_id?: string | null;
           state_epoch?: number;
+          active_question_open?: boolean;
           response_mode?: string;
           recaptcha_required?: boolean;
           room_code?: string | null;

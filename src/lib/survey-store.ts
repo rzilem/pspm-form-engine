@@ -337,13 +337,15 @@ export async function recordAnswer(opts: {
 }): Promise<RecordAnswerResult> {
   const supabase = getSupabaseAdmin();
 
-  // Load survey + question; gate strictly on live + open.
+  // Friendly fast-path checks. The AUTHORITATIVE gate is in the RPC (survey-row
+  // atomic flags); these just return nicer errors without a write attempt.
   const survey = await getSurveyById(opts.surveyId);
   if (!survey) return { ok: false, status: 404, body: { error: "Survey not found" } };
-  if (survey.status !== "live") {
-    return { ok: false, status: 409, body: { error: "Survey is not accepting responses", state_epoch: survey.state_epoch } };
+  if (survey.status !== "live" || !survey.active_question_open || survey.active_question_id !== opts.questionId) {
+    return { ok: false, status: 409, body: { error: "Voting isn't open for this question", state_epoch: survey.state_epoch } };
   }
 
+  // Load the question only for its config (to build the answer validator).
   const { data: question, error: qErr } = await supabase
     .from("survey_questions")
     .select("*")
@@ -355,9 +357,6 @@ export async function recordAnswer(opts: {
     return { ok: false, status: 500, body: { error: "Lookup failed" } };
   }
   if (!question) return { ok: false, status: 404, body: { error: "Question not found" } };
-  if (question.state !== "open") {
-    return { ok: false, status: 409, body: { error: "Voting is closed for this question", state_epoch: survey.state_epoch } };
-  }
 
   // Validate the answer against the question's derived schema.
   const schema = buildAnswerSchema(question.type as SurveyQuestionType, question.config);
@@ -477,6 +476,10 @@ export async function presenterAction(opts: {
       ? survey.active_question_id // keep pointing at the same slide
       : targetId;
   const nextStatus = newState === "open" && survey.status === "draft" ? "live" : survey.status;
+  // The authoritative vote gate — true only while a question is open. Set in the
+  // same UPDATE as the epoch bump so it flips atomically (closes the late-vote
+  // window between the survey CAS and the survey_questions.state write below).
+  const nextActiveOpen = newState === "open";
 
   // 1. CAS the survey first. Only one concurrent action with this expected_epoch
   //    wins the bump; the loser never touches question state.
@@ -485,12 +488,13 @@ export async function presenterAction(opts: {
     .update({
       state_epoch: opts.expectedEpoch + 1,
       active_question_id: nextActiveId,
+      active_question_open: nextActiveOpen,
       status: nextStatus,
       updated_at: new Date().toISOString(),
     })
     .eq("id", opts.surveyId)
     .eq("state_epoch", opts.expectedEpoch)
-    .select("id, state_epoch, status, active_question_id")
+    .select("id, state_epoch, status, active_question_id, active_question_open")
     .maybeSingle();
 
   if (casErr) {
