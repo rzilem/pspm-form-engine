@@ -202,6 +202,11 @@ export const formDefinitionSchema = z.object({
   workflow_config: workflowConfigSchema.default({ enabled: false, steps: [] }),
   confirmation_message: z.string().min(1).max(500),
   recaptcha_required: z.boolean(),
+  // Layout width of the rendered form. "full" fills the host container
+  // (near-full-width when embedded on a page); "boxed" keeps a readable
+  // max-width. Defaults to "full" so existing rows (no column) and new
+  // forms embed edge-to-edge unless explicitly set boxed.
+  width: z.enum(["full", "boxed"]).default("full"),
   created_by: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),

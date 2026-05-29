@@ -6,8 +6,23 @@ import { DynamicField } from "@/components/forms/DynamicField";
 import {
   buildSubmissionSchema,
   resolveVisibleFieldIds,
+  type FieldType,
   type FormDefinition,
 } from "@/lib/form-definitions";
+
+// Field types compact enough to sit two-per-row when the form is wide.
+// Everything else (composites, multi-option, long text, layout, uploads)
+// spans the full width to stay readable. Driven by the FORM's own width via
+// a container query, so a narrow iframe stays single-column regardless of the
+// viewport.
+const HALF_WIDTH_TYPES = new Set<FieldType>([
+  "text",
+  "email",
+  "phone",
+  "number",
+  "date",
+  "select",
+]);
 
 interface DynamicFormProps {
   definition: FormDefinition;
@@ -62,16 +77,24 @@ export function DynamicForm({ definition }: DynamicFormProps) {
           values,
         );
         return (
-          <div className="space-y-5">
-            {definition.field_schema
-              .filter((field) => visible.has(field.id))
-              .map((field) => (
-                <DynamicField
-                  key={field.id}
-                  field={field}
-                  formSlug={definition.slug}
-                />
-              ))}
+          // @container makes the column count respond to the form's own width
+          // (not the viewport), so a narrow embed iframe stays single-column
+          // while a wide/full-width embed lays compact fields two-per-row.
+          <div className="@container">
+            <div className="grid grid-cols-1 gap-5 @2xl:grid-cols-2">
+              {definition.field_schema
+                .filter((field) => visible.has(field.id))
+                .map((field) => (
+                  <div
+                    key={field.id}
+                    className={
+                      HALF_WIDTH_TYPES.has(field.type) ? "" : "@2xl:col-span-2"
+                    }
+                  >
+                    <DynamicField field={field} formSlug={definition.slug} />
+                  </div>
+                ))}
+            </div>
           </div>
         );
       }}

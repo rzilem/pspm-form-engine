@@ -39,13 +39,16 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
   // sits cleanly inside an iframe on psprop.net, and report height to the
   // host page for auto-resize.
   if (embed === "1") {
+    // "full" fills the host container (near-full-width embed); "boxed" keeps a
+    // readable centered max-width.
+    const embedInner = definition.width === "boxed" ? "mx-auto max-w-3xl" : "w-full";
     return (
       // No min-h-screen in embed mode: the wrapper must size to its content so
       // the iframe can shrink when conditional fields hide or errors clear.
       // EmbedAutoHeight measures this element (not body, which RootLayout pins
       // to min-h-full).
       <main id="pspm-embed-root" className="bg-background px-4 py-6">
-        <div className="mx-auto max-w-3xl">
+        <div className={embedInner}>
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-navy">{definition.title}</h1>
             {definition.description && (
@@ -60,7 +63,11 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
   }
 
   return (
-    <FormLayout title={definition.title} subtitle={definition.description ?? undefined}>
+    <FormLayout
+      title={definition.title}
+      subtitle={definition.description ?? undefined}
+      contentWidth={definition.width}
+    >
       <DynamicForm definition={definition} />
     </FormLayout>
   );
