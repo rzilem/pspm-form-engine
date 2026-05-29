@@ -75,6 +75,12 @@ export function SurveyParticipant({ surveyId }: { surveyId: string }) {
     async (answer: Record<string, unknown>) => {
       const active = stateRef.current?.active_question;
       if (!active) return;
+      if (!participantToken) {
+        // Token is minted on mount (~0ms); guard the rare pre-mint tap so a
+        // one_per_device survey doesn't 400.
+        setSubmitError("Just a moment — finishing setup. Tap submit again.");
+        return;
+      }
       setSubmitting(true);
       setSubmitError(null);
       const questionId = active.id;

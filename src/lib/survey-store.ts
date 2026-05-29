@@ -344,6 +344,12 @@ export async function recordAnswer(opts: {
   if (survey.status !== "live" || !survey.active_question_open || survey.active_question_id !== opts.questionId) {
     return { ok: false, status: 409, body: { error: "Voting isn't open for this question", state_epoch: survey.state_epoch } };
   }
+  // one_per_device dedup only works with a token (the partial unique index keys
+  // on it). Without one, every POST would insert a fresh row — so require it
+  // unless the survey is explicitly anonymous.
+  if (survey.response_mode === "one_per_device" && !opts.participantToken) {
+    return { ok: false, status: 400, body: { error: "Missing participant token" } };
+  }
 
   // Load the question only for its config (to build the answer validator).
   const { data: question, error: qErr } = await supabase
@@ -579,8 +585,19 @@ export async function verifyPresenterToken(surveyId: string, token: string | nul
 // ── Survey status (open/close the whole thing) ───────────────────────────────
 export async function setSurveyStatus(surveyId: string, status: "draft" | "live" | "closed" | "archived"): Promise<Survey | null> {
   const supabase = getSupabaseAdmin();
-  const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+  const patch: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+  const ending = status === "closed" || status === "archived";
   if (status === "closed") patch.closed_at = new Date().toISOString();
+  if (ending) {
+    // Stop accepting votes immediately and bump the epoch so phones re-sync to
+    // the ended screen on their next poll.
+    patch.active_question_open = false;
+    patch.state_epoch = await nextEpoch(surveyId);
+  }
+
   const { data, error } = await supabase
     .from("surveys")
     .update(patch)
@@ -591,5 +608,25 @@ export async function setSurveyStatus(surveyId: string, status: "draft" | "live"
     logger.error("setSurveyStatus failed", { error: error.message });
     return null;
   }
+
+  // Close any still-open question so per-question state is consistent with the
+  // ended poll (otherwise after_close aggregates keep returning hidden because
+  // they check survey_questions.state).
+  if (ending) {
+    const { error: qErr } = await supabase
+      .from("survey_questions")
+      .update({ state: "closed", closed_at: new Date().toISOString() })
+      .eq("survey_id", surveyId)
+      .eq("state", "open");
+    if (qErr) logger.error("setSurveyStatus: close-open-question failed", { error: qErr.message });
+  }
+
   return data;
+}
+
+/** Read the current epoch and return epoch+1 (best-effort; defaults to 1). */
+async function nextEpoch(surveyId: string): Promise<number> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase.from("surveys").select("state_epoch").eq("id", surveyId).maybeSingle();
+  return (data?.state_epoch ?? 0) + 1;
 }

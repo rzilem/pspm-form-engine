@@ -153,6 +153,14 @@ BEGIN
     RETURN NULL;
   END IF;
   SELECT * INTO s FROM surveys WHERE id = q.survey_id;
+
+  -- This RPC is granted to anon, so it must enforce its own guards rather than
+  -- relying on the Next routes (a caller could invoke it with a known
+  -- question_id). Archived polls expose nothing.
+  IF s.status = 'archived' THEN
+    RETURN jsonb_build_object('hidden', true, 'reason', 'archived');
+  END IF;
+
   visibility := COALESCE(q.results_visibility, s.results_visibility);
 
   IF visibility = 'private' THEN
