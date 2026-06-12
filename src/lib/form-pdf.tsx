@@ -32,7 +32,11 @@ import type {
   FormDefinition,
   UploadedFile,
 } from "@/lib/form-definitions";
-import { lineItemTotal, formatMoney } from "@/lib/form-definitions";
+import {
+  lineItemTotal,
+  formatMoney,
+  resolveVisibleFieldIds,
+} from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 
 // PSPM brand palette (mirrors src/index.css custom properties).
@@ -226,6 +230,29 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Whether a field has submission data worth showing in the PDF (mirrors the
+// null checks in renderValueCell / renderLineItemsTable / renderTotalRow).
+function wouldRenderFieldInPdf(
+  field: FieldDefinition,
+  value: unknown,
+): boolean {
+  if (field.type === "file_upload") {
+    const files = Array.isArray(value) ? value : [];
+    return files.length > 0;
+  }
+  if (field.type === "signature") {
+    return typeof value === "string" && value.startsWith("data:image/");
+  }
+  if (field.type === "line_items") {
+    return Array.isArray(value) && value.length > 0;
+  }
+  if (field.type === "total") {
+    return value !== undefined && value !== null;
+  }
+  const text = formatValue(value);
+  return text !== "" && text !== "—";
+}
+
 // Decide whether a row should render at all and what its value cell is.
 // Returns null when the field is empty (caller skips it). For file_upload
 // + signature returns a JSX cell; for everything else returns a string
@@ -351,11 +378,18 @@ function DefaultFormDocument({
 
   // Group fields by section_break boundaries so PDFs of long forms with
   // visual sections in the UI render with the same hierarchy on paper.
+  // Only include sections/fields the submitter actually saw (same visibility
+  // fixpoint as the form) and drop section headings with no value-bearing rows.
+  const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
+
   type Group = { heading: string | null; fields: FieldDefinition[] };
   const groups: Group[] = [];
   let current: Group = { heading: null, fields: [] };
   for (const f of definition.field_schema) {
     if (f.type === "page_break") {
+      continue;
+    }
+    if (!visibleIds.has(f.id)) {
       continue;
     }
     if (f.type === "section_break") {
@@ -366,6 +400,10 @@ function DefaultFormDocument({
     }
   }
   if (current.fields.length > 0) groups.push(current);
+
+  const groupsToRender = groups.filter((g) =>
+    g.fields.some((f) => wouldRenderFieldInPdf(f, data[f.id])),
+  );
 
   return (
     <Document>
@@ -387,7 +425,7 @@ function DefaultFormDocument({
           <Text style={styles.description}>{definition.description}</Text>
         ) : null}
 
-        {groups.map((g, gi) => (
+        {groupsToRender.map((g, gi) => (
           <View key={gi} wrap={false}>
             {g.heading ? <Text style={styles.sectionHeading}>{g.heading}</Text> : null}
             <View style={styles.table}>

@@ -219,6 +219,19 @@ function sanitizeId(rawId: unknown, idx: number): string {
   return s.slice(0, 64);
 }
 
+/** Admin-builder label when GF leaves display-only fields blank (html content lives in `html`). */
+function resolveImportLabel(
+  mappedType: FieldDefinition["type"],
+  label: string,
+  idx: number,
+): string {
+  if (label.trim()) return label;
+  if (mappedType === "page_break") return `Page ${idx + 1}`;
+  if (mappedType === "html") return "HTML block";
+  if (mappedType === "section_break") return "Section";
+  return `Field ${idx + 1}`;
+}
+
 function mapField(
   gf: GfField,
   idx: number,
@@ -265,7 +278,7 @@ function mapField(
 
   const def: FieldDefinition = {
     id,
-    label: mappedType === "page_break" && !label.trim() ? `Page ${idx + 1}` : label,
+    label: resolveImportLabel(mappedType, label, idx),
     type: mappedType,
     required: mappedType === "page_break" ? false : required,
     helpText,
