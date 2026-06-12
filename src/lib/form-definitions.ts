@@ -219,10 +219,11 @@ function evaluateConditionRow(
     return false;
   }
 
-  // Effectively-hidden triggers contribute as absent/empty (not a hard false).
-  const tv = isTriggerVisible(row.fieldId)
-    ? values[row.fieldId]
-    : undefined;
+  // Hidden triggers never match — false before operator logic (pre-Wave-2 rule).
+  if (!isTriggerVisible(row.fieldId)) {
+    return false;
+  }
+  const tv = values[row.fieldId];
 
   switch (row.operator) {
     case "is_empty":
@@ -279,8 +280,8 @@ function evaluateConditionRow(
 
 /**
  * Evaluate a conditional gate against submission values.
- * `isTriggerVisible` enforces effective visibility: a hidden trigger's value
- * is treated as empty/absent (pass resolveVisibleFieldIds's `effectiveVisible`).
+ * `isTriggerVisible` enforces effective visibility: a hidden trigger makes the
+ * condition false immediately (pass resolveVisibleFieldIds's `effectiveVisible`).
  * For notification rules (no visibility graph), pass `() => true`.
  */
 export function evaluateCondition(
