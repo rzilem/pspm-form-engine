@@ -943,12 +943,13 @@ export function buildSubmissionSchema(
   return obj;
 }
 
-// Resolve which fields are currently visible for the given values. A field is
-// visible when (a) its own `conditionalOn` passes (transitively — a trigger
-// that is hidden counts as false) and (b) its governing `page_break` (the
-// nearest preceding page_break in schema order) is also visible. Fields before
-// the first page_break have no governing break. Shared by the server validator
-// (buildSubmissionSchema), the wizard (form-wizard), and the client renderer.
+// Resolve which fields are currently visible for the given values. Non-break
+// fields are visible when (a) their own `conditionalOn` passes (transitively —
+// a hidden trigger counts as false) and (b) their governing `page_break` (the
+// nearest preceding break in schema order) passes its OWN conditional only.
+// `page_break` elements use their own conditional only — they are never hidden
+// because a preceding break is hidden. Fields before the first page_break have
+// no governing break. Shared by buildSubmissionSchema, form-wizard, renderer.
 export function resolveVisibleFieldIds(
   fields: FieldDefinition[],
   values: Record<string, unknown>,
@@ -971,6 +972,15 @@ export function resolveVisibleFieldIds(
     return vis;
   }
 
+  // Each page_break's visibility is its own conditionalOn only — breaks are page
+  // delimiters, not nested under a preceding break.
+  const breakOwnVisible = new Map<string, boolean>();
+  for (const f of fields) {
+    if (f.type === "page_break") {
+      breakOwnVisible.set(f.id, isVisible(f.id));
+    }
+  }
+
   // Nearest preceding page_break for each field index (undefined = first page).
   const governingBreakId: (string | undefined)[] = [];
   let currentBreakId: string | undefined;
@@ -984,9 +994,13 @@ export function resolveVisibleFieldIds(
   const visible = new Set<string>();
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
+    if (f.type === "page_break") {
+      if (breakOwnVisible.get(f.id)) visible.add(f.id);
+      continue;
+    }
     if (!isVisible(f.id)) continue;
     const breakId = governingBreakId[i];
-    if (breakId && !isVisible(breakId)) continue;
+    if (breakId && !breakOwnVisible.get(breakId)) continue;
     visible.add(f.id);
   }
   return visible;

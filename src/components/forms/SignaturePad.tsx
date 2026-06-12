@@ -31,10 +31,21 @@ function SignaturePad({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
 
-  const resizeCanvas = useCallback(() => {
+  const isSavedSignatureUrl = (url: string) =>
+    /^data:image\/(png|jpe?g);base64,/.test(url);
+
+  const resizeCanvas = useCallback(async (): Promise<boolean> => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
-    if (!canvas || !container) return;
+    const pad = padRef.current;
+    if (!canvas || !container) return true;
+
+    let savedUrl: string | null = null;
+    if (pad && !pad.isEmpty()) {
+      savedUrl = pad.toDataURL("image/png");
+    } else if (value && isSavedSignatureUrl(value)) {
+      savedUrl = value;
+    }
 
     const ratio = Math.max(window.devicePixelRatio || 1, 1);
     const width = container.clientWidth;
@@ -50,13 +61,16 @@ function SignaturePad({
       ctx.scale(ratio, ratio);
     }
 
-    // Redraw existing data after resize
-    if (padRef.current && !padRef.current.isEmpty()) {
-      const data = padRef.current.toData();
-      padRef.current.clear();
-      padRef.current.fromData(data);
+    if (!pad) return !savedUrl;
+
+    if (savedUrl) {
+      await pad.fromDataURL(savedUrl, { ratio });
+      return pad.isEmpty();
     }
-  }, []);
+
+    pad.clear();
+    return true;
+  }, [value]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -75,15 +89,10 @@ function SignaturePad({
     });
 
     padRef.current = pad;
-    resizeCanvas();
-
-    if (value && /^data:image\/(png|jpe?g);base64,/.test(value)) {
-      pad.fromDataURL(value);
-      setIsEmpty(pad.isEmpty());
-    }
+    void resizeCanvas().then(setIsEmpty);
 
     const observer = new ResizeObserver(() => {
-      resizeCanvas();
+      void resizeCanvas().then(setIsEmpty);
     });
     const container = containerRef.current;
     if (container) {
