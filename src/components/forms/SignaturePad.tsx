@@ -12,7 +12,7 @@ interface SignaturePadProps {
   label: string;
   required?: boolean;
   error?: FormFieldError;
-  /** Controlled PNG data URL — rehydrates the canvas on mount/remount. */
+  /** Controlled PNG data URL — sole source of truth for canvas content. */
   value?: string;
   onChange?: (dataUrl: string) => void;
   className?: string;
@@ -29,23 +29,20 @@ function SignaturePad({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const padRef = useRef<SignaturePadLib | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const valueRef = useRef(value);
+  const restoringRef = useRef(false);
   const [isEmpty, setIsEmpty] = useState(true);
+
+  valueRef.current = value;
 
   const isSavedSignatureUrl = (url: string) =>
     /^data:image\/(png|jpe?g);base64,/.test(url);
 
-  const resizeCanvas = useCallback(async (): Promise<boolean> => {
+  const redrawFromValue = useCallback(async (): Promise<boolean> => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     const pad = padRef.current;
     if (!canvas || !container) return true;
-
-    let savedUrl: string | null = null;
-    if (pad && !pad.isEmpty()) {
-      savedUrl = pad.toDataURL("image/png");
-    } else if (value && isSavedSignatureUrl(value)) {
-      savedUrl = value;
-    }
 
     const ratio = Math.max(window.devicePixelRatio || 1, 1);
     const width = container.clientWidth;
@@ -61,16 +58,26 @@ function SignaturePad({
       ctx.scale(ratio, ratio);
     }
 
-    if (!pad) return !savedUrl;
+    if (!pad) return !valueRef.current;
+
+    const savedUrl =
+      valueRef.current && isSavedSignatureUrl(valueRef.current)
+        ? valueRef.current
+        : null;
 
     if (savedUrl) {
-      await pad.fromDataURL(savedUrl, { ratio });
+      restoringRef.current = true;
+      try {
+        await pad.fromDataURL(savedUrl, { ratio });
+      } finally {
+        restoringRef.current = false;
+      }
       return pad.isEmpty();
     }
 
     pad.clear();
     return true;
-  }, [value]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -83,16 +90,15 @@ function SignaturePad({
 
     pad.addEventListener("endStroke", () => {
       setIsEmpty(pad.isEmpty());
-      if (onChange) {
-        onChange(pad.toDataURL("image/png"));
-      }
+      onChange?.(pad.toDataURL("image/png"));
     });
 
     padRef.current = pad;
-    void resizeCanvas().then(setIsEmpty);
+    void redrawFromValue().then(setIsEmpty);
 
     const observer = new ResizeObserver(() => {
-      void resizeCanvas().then(setIsEmpty);
+      if (restoringRef.current) return;
+      void redrawFromValue().then(setIsEmpty);
     });
     const container = containerRef.current;
     if (container) {
@@ -103,7 +109,13 @@ function SignaturePad({
       pad.off();
       observer.disconnect();
     };
-  }, [onChange, resizeCanvas, value]);
+  }, [onChange, redrawFromValue]);
+
+  // Controlled value changes from parent (Next/Back remount, external reset).
+  useEffect(() => {
+    if (!padRef.current || restoringRef.current) return;
+    void redrawFromValue().then(setIsEmpty);
+  }, [value, redrawFromValue]);
 
   function handleClear() {
     if (padRef.current) {

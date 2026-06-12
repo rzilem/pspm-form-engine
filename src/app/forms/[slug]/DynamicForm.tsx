@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type RefObject,
+} from "react";
 import { useFormContext } from "react-hook-form";
 import {
   FormEngine,
@@ -49,6 +56,18 @@ interface DynamicFormProps {
 function notifyEmbedRemeasure() {
   const root = document.getElementById("pspm-embed-root");
   root?.dispatchEvent(new CustomEvent("pspm-form:remeasure"));
+}
+
+/** Clears wizard guard ref without lifting state (flat forms). */
+function ClearWizardGuard({
+  wizardGuardRef,
+}: {
+  wizardGuardRef: RefObject<FormWizardSubmitGuard | null>;
+}) {
+  useLayoutEffect(() => {
+    wizardGuardRef.current = null;
+  });
+  return null;
 }
 
 function WizardProgress({
@@ -290,7 +309,7 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
       preview={preview}
       hideDefaultSubmit={wizardEnabled}
     >
-      {({ watch, setWizardSubmitGuard }) => {
+      {({ watch, wizardGuardRef }) => {
         const values = watch() as Record<string, unknown>;
         const visible = resolveVisibleFieldIds(
           definition.field_schema,
@@ -305,11 +324,16 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
           const visibleFields = definition.field_schema.filter((field) =>
             visible.has(field.id),
           );
-          return renderFieldGrid(
-            visibleFields,
-            definition,
-            preview,
-            computedTotal,
+          return (
+            <>
+              <ClearWizardGuard wizardGuardRef={wizardGuardRef} />
+              {renderFieldGrid(
+                visibleFields,
+                definition,
+                preview,
+                computedTotal,
+              )}
+            </>
           );
         }
 
@@ -325,7 +349,7 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
             computedTotal={computedTotal}
             visible={visible}
             onPageChange={setCurrentPageIndex}
-            setWizardSubmitGuard={setWizardSubmitGuard}
+            wizardGuardRef={wizardGuardRef}
           />
         );
       }}
@@ -342,7 +366,7 @@ function DynamicFormWizardBody({
   computedTotal,
   visible,
   onPageChange,
-  setWizardSubmitGuard,
+  wizardGuardRef,
 }: {
   pages: FormWizardPage[];
   visiblePageIndices: number[];
@@ -352,7 +376,7 @@ function DynamicFormWizardBody({
   computedTotal: number;
   visible: Set<string>;
   onPageChange: (index: number) => void;
-  setWizardSubmitGuard: (guard: FormWizardSubmitGuard | null) => void;
+  wizardGuardRef: RefObject<FormWizardSubmitGuard | null>;
 }) {
   const { trigger } = useFormContext();
 
@@ -395,13 +419,16 @@ function DynamicFormWizardBody({
     if (prev !== activePageIndex) onPageChange(prev);
   }, [activePageIndex, onPageChange, pages, visible]);
 
-  useEffect(() => {
-    setWizardSubmitGuard({
+  // Sync guard into ref (no parent setState) — FormEngine reads at submit/key time.
+  useLayoutEffect(() => {
+    wizardGuardRef.current = {
       isLastPage: isLastVisible,
       onAdvance: handleNext,
-    });
-    return () => setWizardSubmitGuard(null);
-  }, [handleNext, isLastVisible, setWizardSubmitGuard]);
+    };
+    return () => {
+      wizardGuardRef.current = null;
+    };
+  }, [handleNext, isLastVisible, wizardGuardRef]);
 
   return (
     <div className="space-y-6">

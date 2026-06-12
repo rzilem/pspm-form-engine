@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import {
   FormProvider,
   useForm,
@@ -60,7 +60,8 @@ interface FormEngineProps<T extends FieldValues> {
     control: ReturnType<typeof useForm<T>>["control"];
     watch: ReturnType<typeof useForm<T>>["watch"];
     setValue: ReturnType<typeof useForm<T>>["setValue"];
-    setWizardSubmitGuard: (guard: FormWizardSubmitGuard | null) => void;
+    /** Mutate `.current` during render — never lifts guard into parent state. */
+    wizardGuardRef: RefObject<FormWizardSubmitGuard | null>;
   }) => React.ReactNode;
 }
 
@@ -77,11 +78,12 @@ function FormEngine<T extends FieldValues>({
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [wizardGuardFromChild, setWizardGuardFromChild] =
-    useState<FormWizardSubmitGuard | null>(null);
+  const wizardGuardRef = useRef<FormWizardSubmitGuard | null>(null);
   const honeypotRef = useRef<HTMLInputElement>(null);
 
-  const wizardGuard = wizardSubmitGuardProp ?? wizardGuardFromChild;
+  function readWizardGuard(): FormWizardSubmitGuard | null {
+    return wizardSubmitGuardProp ?? wizardGuardRef.current;
+  }
 
   // reCAPTCHA is active only when a site key is configured AND this form hasn't
   // opted out (recaptcha=false). Drives the script load, token fetch, and the
@@ -172,18 +174,36 @@ function FormEngine<T extends FieldValues>({
     );
   }
 
+  const TEXT_LIKE_INPUT_TYPES = new Set([
+    "text",
+    "email",
+    "tel",
+    "url",
+    "number",
+    "password",
+    "search",
+  ]);
+
   function handleFormKeyDown(e: KeyboardEvent<HTMLFormElement>) {
-    if (!wizardGuard || wizardGuard.isLastPage || e.key !== "Enter") return;
+    if (e.key !== "Enter") return;
+    const guard = readWizardGuard();
+    if (!guard || guard.isLastPage) return;
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
+    if (target.tagName === "BUTTON") return;
     if (target.tagName === "TEXTAREA" || target.isContentEditable) return;
-    e.preventDefault();
-    void wizardGuard.onAdvance();
+    if (target instanceof HTMLInputElement) {
+      const type = target.type || "text";
+      if (!TEXT_LIKE_INPUT_TYPES.has(type)) return;
+      e.preventDefault();
+      void guard.onAdvance();
+    }
   }
 
   const submitHandler = handleSubmit(async (data: T) => {
-    if (wizardGuard && !wizardGuard.isLastPage) {
-      await wizardGuard.onAdvance();
+    const guard = readWizardGuard();
+    if (guard && !guard.isLastPage) {
+      await guard.onAdvance();
       return;
     }
     await onSubmit(data);
@@ -203,7 +223,7 @@ function FormEngine<T extends FieldValues>({
           control,
           watch,
           setValue,
-          setWizardSubmitGuard: setWizardGuardFromChild,
+          wizardGuardRef,
         })}
 
         {/* Honeypot — hidden from humans, auto-filled by bots. The server

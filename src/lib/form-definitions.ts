@@ -205,7 +205,6 @@ function evaluateConditionRow(
   isTriggerVisible: (fieldId: string) => boolean,
 ): boolean {
   if (!row.fieldId) return false;
-  if (!isTriggerVisible(row.fieldId)) return false;
 
   // Missing `value` is invalid for comparison operators; an empty string is a
   // valid literal target for equals/not_equals only (legacy `equals: ""` gates
@@ -220,7 +219,10 @@ function evaluateConditionRow(
     return false;
   }
 
-  const tv = values[row.fieldId];
+  // Effectively-hidden triggers contribute as absent/empty (not a hard false).
+  const tv = isTriggerVisible(row.fieldId)
+    ? values[row.fieldId]
+    : undefined;
 
   switch (row.operator) {
     case "is_empty":
@@ -277,8 +279,8 @@ function evaluateConditionRow(
 
 /**
  * Evaluate a conditional gate against submission values.
- * `isTriggerVisible` enforces transitive hide: a condition whose trigger
- * field is hidden counts as false (pass resolveVisibleFieldIds's `isVisible`).
+ * `isTriggerVisible` enforces effective visibility: a hidden trigger's value
+ * is treated as empty/absent (pass resolveVisibleFieldIds's `effectiveVisible`).
  * For notification rules (no visibility graph), pass `() => true`.
  */
 export function evaluateCondition(
@@ -943,43 +945,19 @@ export function buildSubmissionSchema(
   return obj;
 }
 
-// Resolve which fields are currently visible for the given values. Non-break
-// fields are visible when (a) their own `conditionalOn` passes (transitively —
-// a hidden trigger counts as false) and (b) their governing `page_break` (the
-// nearest preceding break in schema order) passes its OWN conditional only.
-// `page_break` elements use their own conditional only — they are never hidden
-// because a preceding break is hidden. Fields before the first page_break have
-// no governing break. Shared by buildSubmissionSchema, form-wizard, renderer.
+// Resolve which fields are currently visible for the given values. Effective
+// visibility = own conditional passes (triggers read via the same fixpoint) AND
+// governing page_break is effectively visible. page_break elements are governed
+// only by their own conditional — never by a preceding break. Fields before the
+// first page_break have no governing break. Shared by buildSubmissionSchema,
+// form-wizard, renderer.
 export function resolveVisibleFieldIds(
   fields: FieldDefinition[],
   values: Record<string, unknown>,
 ): Set<string> {
   const fieldsById = new Map(fields.map((f) => [f.id, f]));
-  const cache = new Map<string, boolean>();
-
-  function isVisible(fieldId: string): boolean {
-    const cached = cache.get(fieldId);
-    if (cached !== undefined) return cached;
-    const f = fieldsById.get(fieldId);
-    if (!f) return true; // unknown trigger id → no gating
-    if (!f.conditionalOn) {
-      cache.set(fieldId, true);
-      return true;
-    }
-    cache.set(fieldId, false); // provisional, guards against cycles
-    const vis = evaluateCondition(f.conditionalOn, values, isVisible);
-    cache.set(fieldId, vis);
-    return vis;
-  }
-
-  // Each page_break's visibility is its own conditionalOn only — breaks are page
-  // delimiters, not nested under a preceding break.
-  const breakOwnVisible = new Map<string, boolean>();
-  for (const f of fields) {
-    if (f.type === "page_break") {
-      breakOwnVisible.set(f.id, isVisible(f.id));
-    }
-  }
+  const fieldIndexById = new Map<string, number>();
+  fields.forEach((f, i) => fieldIndexById.set(f.id, i));
 
   // Nearest preceding page_break for each field index (undefined = first page).
   const governingBreakId: (string | undefined)[] = [];
@@ -991,17 +969,48 @@ export function resolveVisibleFieldIds(
     }
   }
 
-  const visible = new Set<string>();
-  for (let i = 0; i < fields.length; i++) {
-    const f = fields[i];
-    if (f.type === "page_break") {
-      if (breakOwnVisible.get(f.id)) visible.add(f.id);
-      continue;
+  const cache = new Map<string, boolean>();
+
+  function effectiveVisible(fieldId: string): boolean {
+    const cached = cache.get(fieldId);
+    if (cached !== undefined) return cached;
+
+    const f = fieldsById.get(fieldId);
+    if (!f) {
+      cache.set(fieldId, true);
+      return true;
     }
-    if (!isVisible(f.id)) continue;
-    const breakId = governingBreakId[i];
-    if (breakId && !breakOwnVisible.get(breakId)) continue;
-    visible.add(f.id);
+
+    cache.set(fieldId, false); // provisional, guards against cycles
+
+    if (
+      f.conditionalOn &&
+      !evaluateCondition(f.conditionalOn, values, effectiveVisible)
+    ) {
+      cache.set(fieldId, false);
+      return false;
+    }
+
+    if (f.type === "page_break") {
+      cache.set(fieldId, true);
+      return true;
+    }
+
+    const idx = fieldIndexById.get(fieldId);
+    const breakId =
+      idx !== undefined ? governingBreakId[idx] : undefined;
+    if (breakId && !effectiveVisible(breakId)) {
+      cache.set(fieldId, false);
+      return false;
+    }
+
+    cache.set(fieldId, true);
+    return true;
+  }
+
+  const visible = new Set<string>();
+  for (const f of fields) {
+    if (effectiveVisible(f.id)) visible.add(f.id);
   }
   return visible;
 }
