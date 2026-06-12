@@ -788,8 +788,10 @@ export function resolveVisibleFieldIds(
 const FIELD_TOKEN = /^\s*\{\{\s*field\.([a-zA-Z0-9_-]+)\s*\}\}\s*$/;
 
 // ── Notification body merge tags (GF parity) ────────────────────────────
-const BODY_FIELD_TOKEN = /\{\{\s*field\.([a-zA-Z0-9_-]+)\s*\}\}/g;
-const ALL_FIELDS_TOKEN = /\{all_fields\}/g;
+// Single-pass tokenizer: matches `{{field.<id>}}` and `{all_fields}` only in the
+// original template so injected user values are never re-scanned as tokens.
+const BODY_MERGE_TOKEN =
+  /\{\{\s*field\.([a-zA-Z0-9_-]+)\s*\}\}|\{all_fields\}/g;
 
 function escapeNotificationHtml(str: string): string {
   return str
@@ -1002,13 +1004,15 @@ export function renderBodyTemplate(
     return formatFieldDisplayText(field, data[fieldId]);
   };
 
-  const html = template
-    .replace(ALL_FIELDS_TOKEN, () => renderAllFieldsHtml(def, data))
-    .replace(BODY_FIELD_TOKEN, (_m, fieldId: string) => expandFieldHtml(fieldId));
+  const html = template.replace(BODY_MERGE_TOKEN, (match, fieldId?: string) => {
+    if (match === "{all_fields}") return renderAllFieldsHtml(def, data);
+    return expandFieldHtml(fieldId ?? "");
+  });
 
-  const text = template
-    .replace(ALL_FIELDS_TOKEN, () => renderAllFieldsText(def, data))
-    .replace(BODY_FIELD_TOKEN, (_m, fieldId: string) => expandFieldText(fieldId));
+  const text = template.replace(BODY_MERGE_TOKEN, (match, fieldId?: string) => {
+    if (match === "{all_fields}") return renderAllFieldsText(def, data);
+    return expandFieldText(fieldId ?? "");
+  });
 
   return { html, text };
 }

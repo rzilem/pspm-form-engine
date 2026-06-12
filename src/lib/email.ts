@@ -179,13 +179,20 @@ function buildDynamicNotificationBodies(
   rule: NotificationRule,
 ): { html: string; text: string } {
   if (rule.body?.trim()) {
-    const rendered = renderBodyTemplate(rule.body.trim(), def, data);
+    const customBody = rule.body.trim();
+    const rendered = renderBodyTemplate(customBody, def, data);
+    // CloudMailin parses Label: Value lines from the plaintext MIME part — always
+    // include them even when the custom body omits `{all_fields}` (HTML stays custom).
+    const supplementalAllFields = /\{all_fields\}/.test(customBody)
+      ? ""
+      : renderBodyTemplate("{all_fields}", def, data).text;
     return {
       html:
         notificationIntroHtml(def) + rendered.html + notificationFooterHtml(),
       text: joinPlainSections([
         notificationIntroText(def),
         rendered.text,
+        supplementalAllFields,
         notificationFooterText(),
       ]),
     };
