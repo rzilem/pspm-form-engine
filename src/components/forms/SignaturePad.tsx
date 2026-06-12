@@ -12,6 +12,8 @@ interface SignaturePadProps {
   label: string;
   required?: boolean;
   error?: FormFieldError;
+  /** Controlled PNG data URL — rehydrates the canvas on mount/remount. */
+  value?: string;
   onChange?: (dataUrl: string) => void;
   className?: string;
 }
@@ -20,6 +22,7 @@ function SignaturePad({
   label,
   required,
   error,
+  value = "",
   onChange,
   className = "",
 }: SignaturePadProps) {
@@ -74,6 +77,11 @@ function SignaturePad({
     padRef.current = pad;
     resizeCanvas();
 
+    if (value && /^data:image\/(png|jpe?g);base64,/.test(value)) {
+      pad.fromDataURL(value);
+      setIsEmpty(pad.isEmpty());
+    }
+
     const observer = new ResizeObserver(() => {
       resizeCanvas();
     });
@@ -86,7 +94,7 @@ function SignaturePad({
       pad.off();
       observer.disconnect();
     };
-  }, [onChange, resizeCanvas]);
+  }, [onChange, resizeCanvas, value]);
 
   function handleClear() {
     if (padRef.current) {

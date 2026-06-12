@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFormContext } from "react-hook-form";
-import { FormEngine } from "@/components/forms/FormEngine";
+import {
+  FormEngine,
+  type FormWizardSubmitGuard,
+} from "@/components/forms/FormEngine";
 import { DynamicField } from "@/components/forms/DynamicField";
 import { Button } from "@/components/ui/Button";
 import {
@@ -287,7 +290,7 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
       preview={preview}
       hideDefaultSubmit={wizardEnabled}
     >
-      {({ watch }) => {
+      {({ watch, setWizardSubmitGuard }) => {
         const values = watch() as Record<string, unknown>;
         const visible = resolveVisibleFieldIds(
           definition.field_schema,
@@ -322,6 +325,7 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
             computedTotal={computedTotal}
             visible={visible}
             onPageChange={setCurrentPageIndex}
+            setWizardSubmitGuard={setWizardSubmitGuard}
           />
         );
       }}
@@ -338,6 +342,7 @@ function DynamicFormWizardBody({
   computedTotal,
   visible,
   onPageChange,
+  setWizardSubmitGuard,
 }: {
   pages: FormWizardPage[];
   visiblePageIndices: number[];
@@ -347,6 +352,7 @@ function DynamicFormWizardBody({
   computedTotal: number;
   visible: Set<string>;
   onPageChange: (index: number) => void;
+  setWizardSubmitGuard: (guard: FormWizardSubmitGuard | null) => void;
 }) {
   const { trigger } = useFormContext();
 
@@ -388,6 +394,14 @@ function DynamicFormWizardBody({
     const prev = stepWizardPageIndex(pages, visible, activePageIndex, -1);
     if (prev !== activePageIndex) onPageChange(prev);
   }, [activePageIndex, onPageChange, pages, visible]);
+
+  useEffect(() => {
+    setWizardSubmitGuard({
+      isLastPage: isLastVisible,
+      onAdvance: handleNext,
+    });
+    return () => setWizardSubmitGuard(null);
+  }, [handleNext, isLastVisible, setWizardSubmitGuard]);
 
   return (
     <div className="space-y-6">

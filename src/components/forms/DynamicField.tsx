@@ -483,6 +483,11 @@ export function DynamicField({
             label={field.label}
             required={field.required}
             error={error}
+            value={
+              typeof controllerField.value === "string"
+                ? controllerField.value
+                : ""
+            }
             onChange={(dataUrl) => controllerField.onChange(dataUrl)}
           />
         )}

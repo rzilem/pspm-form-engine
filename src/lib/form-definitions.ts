@@ -587,11 +587,10 @@ export function buildSubmissionSchema(
   fields: FieldDefinition[],
 ): z.ZodType<Record<string, unknown>> {
   const shape: Record<string, z.ZodTypeAny> = {};
-  // Conditional fields are validated only when their condition is met. We keep
-  // the field's full "present" validator here and run it inside the superRefine
-  // below, so (a) a since-hidden field's stale value is ignored entirely and
-  // (b) required + format are both enforced when the field is shown.
-  const conditionalLeaves: { field: FieldDefinition; leaf: z.ZodTypeAny }[] = [];
+  // Every input field's full validator is deferred to superRefine so visibility
+  // (conditional + governing page_break) is evaluated against the full payload
+  // before required/format checks run. Stale values on hidden fields are ignored.
+  const validationLeaves: { field: FieldDefinition; leaf: z.ZodTypeAny }[] = [];
 
   for (const f of fields) {
     // Display-only blocks carry no input value. `total` is computed
@@ -607,10 +606,8 @@ export function buildSubmissionSchema(
 
     let leaf: z.ZodTypeAny;
 
-    const isConditional = Boolean(f.conditionalOn);
-    // Required enforcement is applied as if the field is present/shown. For
-    // non-conditional fields that is the final word; for conditional fields it
-    // only takes effect via the superRefine when the condition matches.
+    // Required enforcement is applied as if the field is present/shown; the
+    // superRefine only runs the leaf when resolveVisibleFieldIds says visible.
     const requiredWhenPresent = Boolean(f.required);
 
     switch (f.type) {
@@ -780,27 +777,17 @@ export function buildSubmissionSchema(
       );
     }
 
-    // Conditional fields are validated only when shown — defer the leaf to the
-    // superRefine and keep the shape permissive so a since-hidden field's stale
-    // value can never fail validation.
-    if (isConditional) {
-      conditionalLeaves.push({ field: f, leaf });
-      shape[f.id] = z.unknown().optional();
-    } else {
-      shape[f.id] = leaf;
-    }
+    validationLeaves.push({ field: f, leaf });
+    shape[f.id] = z.unknown().optional();
   }
 
   let obj = z.object(shape) as unknown as z.ZodType<Record<string, unknown>>;
 
-  if (conditionalLeaves.length > 0) {
-    // Validate each conditional field with its own "present" leaf, but only
-    // when it is genuinely visible. A hidden field's value (which RHF keeps
-    // after the field unmounts) is neither validated nor stored.
+  if (validationLeaves.length > 0) {
     obj = (obj as unknown as z.ZodObject<z.ZodRawShape>)
       .superRefine((data: Record<string, unknown>, ctx: z.RefinementCtx) => {
         const visible = resolveVisibleFieldIds(fields, data);
-        for (const { field: f, leaf } of conditionalLeaves) {
+        for (const { field: f, leaf } of validationLeaves) {
           if (!visible.has(f.id)) continue;
           const result = leaf.safeParse(data[f.id]);
           if (!result.success) {
@@ -810,13 +797,10 @@ export function buildSubmissionSchema(
           }
         }
       })
-      // Strip hidden conditional values from the parsed output so they are
-      // never persisted/emailed/rendered, and normalize visible ones to the
-      // same Zod-coerced shape non-conditional fields get (e.g. "5" -> 5).
       .transform((data: Record<string, unknown>) => {
         const visible = resolveVisibleFieldIds(fields, data);
         const out: Record<string, unknown> = { ...data };
-        for (const { field: f, leaf } of conditionalLeaves) {
+        for (const { field: f, leaf } of validationLeaves) {
           if (!visible.has(f.id)) {
             delete out[f.id];
             continue;
@@ -960,11 +944,11 @@ export function buildSubmissionSchema(
 }
 
 // Resolve which fields are currently visible for the given values. A field is
-// visible unless it is gated (`conditionalOn`) by a trigger that is itself
-// hidden OR whose value doesn't match — resolved transitively so a gate on a
-// hidden ancestor also hides the descendant. Shared by the server validator
-// (buildSubmissionSchema) and the client renderer (DynamicForm) so the two can
-// never disagree about which fields count. Section breaks are always "visible".
+// visible when (a) its own `conditionalOn` passes (transitively — a trigger
+// that is hidden counts as false) and (b) its governing `page_break` (the
+// nearest preceding page_break in schema order) is also visible. Fields before
+// the first page_break have no governing break. Shared by the server validator
+// (buildSubmissionSchema), the wizard (form-wizard), and the client renderer.
 export function resolveVisibleFieldIds(
   fields: FieldDefinition[],
   values: Record<string, unknown>,
@@ -987,11 +971,23 @@ export function resolveVisibleFieldIds(
     return vis;
   }
 
-  const visible = new Set<string>();
+  // Nearest preceding page_break for each field index (undefined = first page).
+  const governingBreakId: (string | undefined)[] = [];
+  let currentBreakId: string | undefined;
   for (const f of fields) {
-    // Section breaks are headings, not data — but they can still carry
-    // conditionalOn, so a heading inside a hidden branch must hide too.
-    if (isVisible(f.id)) visible.add(f.id);
+    governingBreakId.push(currentBreakId);
+    if (f.type === "page_break") {
+      currentBreakId = f.id;
+    }
+  }
+
+  const visible = new Set<string>();
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    if (!isVisible(f.id)) continue;
+    const breakId = governingBreakId[i];
+    if (breakId && !isVisible(breakId)) continue;
+    visible.add(f.id);
   }
   return visible;
 }

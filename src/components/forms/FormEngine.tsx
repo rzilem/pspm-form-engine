@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   FormProvider,
   useForm,
@@ -29,6 +29,12 @@ const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
 // spam guard. This makes reCAPTCHA a progressive enhancement, not a fake badge.
 // Shared script-load + token-fetch live in lib/recaptcha-client.
 
+/** When set, non-final wizard pages block real submit (Enter + implicit submit). */
+export type FormWizardSubmitGuard = {
+  isLastPage: boolean;
+  onAdvance: () => void | Promise<void>;
+};
+
 interface FormEngineProps<T extends FieldValues> {
   schema: z.ZodType<T>;
   formSlug: string;
@@ -46,12 +52,15 @@ interface FormEngineProps<T extends FieldValues> {
   // When true, omit the default full-width Submit button (e.g. multi-page
   // dynamic forms render their own nav + submit on the last step).
   hideDefaultSubmit?: boolean;
+  /** Multi-page wizard: intercept submit/Enter until the last visible page. */
+  wizardSubmitGuard?: FormWizardSubmitGuard | null;
   children: (props: {
     errors: FieldErrors<T>;
     register: ReturnType<typeof useForm<T>>["register"];
     control: ReturnType<typeof useForm<T>>["control"];
     watch: ReturnType<typeof useForm<T>>["watch"];
     setValue: ReturnType<typeof useForm<T>>["setValue"];
+    setWizardSubmitGuard: (guard: FormWizardSubmitGuard | null) => void;
   }) => React.ReactNode;
 }
 
@@ -63,11 +72,16 @@ function FormEngine<T extends FieldValues>({
   recaptcha = true,
   preview = false,
   hideDefaultSubmit = false,
+  wizardSubmitGuard: wizardSubmitGuardProp = null,
   children,
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [wizardGuardFromChild, setWizardGuardFromChild] =
+    useState<FormWizardSubmitGuard | null>(null);
   const honeypotRef = useRef<HTMLInputElement>(null);
+
+  const wizardGuard = wizardSubmitGuardProp ?? wizardGuardFromChild;
 
   // reCAPTCHA is active only when a site key is configured AND this form hasn't
   // opted out (recaptcha=false). Drives the script load, token fetch, and the
@@ -158,10 +172,28 @@ function FormEngine<T extends FieldValues>({
     );
   }
 
+  function handleFormKeyDown(e: KeyboardEvent<HTMLFormElement>) {
+    if (!wizardGuard || wizardGuard.isLastPage || e.key !== "Enter") return;
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.tagName === "TEXTAREA" || target.isContentEditable) return;
+    e.preventDefault();
+    void wizardGuard.onAdvance();
+  }
+
+  const submitHandler = handleSubmit(async (data: T) => {
+    if (wizardGuard && !wizardGuard.isLastPage) {
+      await wizardGuard.onAdvance();
+      return;
+    }
+    await onSubmit(data);
+  });
+
   return (
     <FormProvider {...methods}>
       <form
-        onSubmit={handleSubmit(onSubmit)}
+        onSubmit={submitHandler}
+        onKeyDown={handleFormKeyDown}
         noValidate
         className="space-y-6"
       >
@@ -171,6 +203,7 @@ function FormEngine<T extends FieldValues>({
           control,
           watch,
           setValue,
+          setWizardSubmitGuard: setWizardGuardFromChild,
         })}
 
         {/* Honeypot — hidden from humans, auto-filled by bots. The server
