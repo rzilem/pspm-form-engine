@@ -43,6 +43,9 @@ interface FormEngineProps<T extends FieldValues> {
   // no-op) and never loads reCAPTCHA — so editing a form in the admin builder
   // can't post a real submission.
   preview?: boolean;
+  // When true, omit the default full-width Submit button (e.g. multi-page
+  // dynamic forms render their own nav + submit on the last step).
+  hideDefaultSubmit?: boolean;
   children: (props: {
     errors: FieldErrors<T>;
     register: ReturnType<typeof useForm<T>>["register"];
@@ -59,6 +62,7 @@ function FormEngine<T extends FieldValues>({
   confirmationMessage,
   recaptcha = true,
   preview = false,
+  hideDefaultSubmit = false,
   children,
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
@@ -221,15 +225,17 @@ function FormEngine<T extends FieldValues>({
           </div>
         )}
 
-        <Button
-          type="submit"
-          size="lg"
-          loading={isSubmitting}
-          disabled={preview}
-          className="w-full"
-        >
-          Submit
-        </Button>
+        {!hideDefaultSubmit && (
+          <Button
+            type="submit"
+            size="lg"
+            loading={isSubmitting}
+            disabled={preview}
+            className="w-full"
+          >
+            Submit
+          </Button>
+        )}
       </form>
     </FormProvider>
   );

@@ -223,7 +223,10 @@ function renderDynamicEmailBody(
   data: Record<string, unknown>,
 ): string {
   const rows = def.field_schema
-    .filter((f: FieldDefinition) => f.type !== "section_break")
+    .filter(
+      (f: FieldDefinition) =>
+        f.type !== "section_break" && f.type !== "page_break",
+    )
     .map((f) => {
       const raw = data[f.id];
       const cellHtml = renderFieldCellHtml(f, raw);

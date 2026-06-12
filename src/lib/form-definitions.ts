@@ -31,6 +31,7 @@ export const FIELD_TYPES = [
   "file_upload",
   "signature",
   "section_break",
+  "page_break",
   "html",
   "line_items",
   "total",
@@ -596,7 +597,12 @@ export function buildSubmissionSchema(
     // Display-only blocks carry no input value. `total` is computed
     // server-side from the line_items below (a client-sent total is ignored),
     // so it's skipped here and injected by the transform at the end.
-    if (f.type === "section_break" || f.type === "html" || f.type === "total")
+    if (
+      f.type === "section_break" ||
+      f.type === "page_break" ||
+      f.type === "html" ||
+      f.type === "total"
+    )
       continue;
 
     let leaf: z.ZodTypeAny;
@@ -1019,7 +1025,12 @@ export function formatFieldDisplayText(
   field: FieldDefinition,
   raw: unknown,
 ): string {
-  if (field.type === "section_break" || field.type === "html") return "";
+  if (
+    field.type === "section_break" ||
+    field.type === "page_break" ||
+    field.type === "html"
+  )
+    return "";
 
   switch (field.type) {
     case "name": {
@@ -1122,7 +1133,12 @@ function formatFieldDisplayHtmlCell(
   field: FieldDefinition,
   raw: unknown,
 ): string {
-  if (field.type === "section_break" || field.type === "html") return "";
+  if (
+    field.type === "section_break" ||
+    field.type === "page_break" ||
+    field.type === "html"
+  )
+    return "";
 
   // Structured/special types share the same semantic value; escape for HTML.
   if (
@@ -1154,7 +1170,10 @@ function notificationFieldsForBody(
   const visible = resolveVisibleFieldIds(def.field_schema, data);
   return def.field_schema.filter(
     (f) =>
-      visible.has(f.id) && f.type !== "section_break" && f.type !== "html",
+      visible.has(f.id) &&
+      f.type !== "section_break" &&
+      f.type !== "page_break" &&
+      f.type !== "html",
   );
 }
 

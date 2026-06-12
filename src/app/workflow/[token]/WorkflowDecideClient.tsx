@@ -130,7 +130,9 @@ export function WorkflowDecideClient({
         <table className="w-full text-sm">
           <tbody>
             {fieldSchema
-              .filter((f) => f.type !== "section_break")
+              .filter(
+                (f) => f.type !== "section_break" && f.type !== "page_break",
+              )
               .map((f) => {
                 const display = formatFieldDisplay(f, submissionData[f.id]);
                 if (!display) return null;

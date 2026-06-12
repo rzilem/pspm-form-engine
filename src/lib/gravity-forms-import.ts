@@ -7,7 +7,7 @@
  * or a single form object for the REST GET. This module accepts either.
  *
  * The mapping is deliberately conservative — when in doubt we land on
- * "text" rather than skip. Unsupported types (page break, list, post-*)
+ * "text" rather than skip. Unsupported types (list, post-*)
  * emit a `warnings` entry so the admin can decide whether to redo by hand.
  */
 import { z } from "zod";
@@ -157,7 +157,7 @@ const FIELD_TYPE_MAP: Record<string, FieldDefinition["type"] | null> = {
   hidden: "text", // map to text so the value still gets captured
   // Unsupported — warn and skip. Listed explicitly so we don't silently
   // map them via the default.
-  page: null,
+  page: "page_break",
   list: null,
   post_title: null,
   post_content: null,
@@ -265,9 +265,9 @@ function mapField(
 
   const def: FieldDefinition = {
     id,
-    label,
+    label: mappedType === "page_break" && !label.trim() ? `Page ${idx + 1}` : label,
     type: mappedType,
-    required,
+    required: mappedType === "page_break" ? false : required,
     helpText,
     placeholder,
     options,

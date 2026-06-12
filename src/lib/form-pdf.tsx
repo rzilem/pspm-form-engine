@@ -355,6 +355,9 @@ function DefaultFormDocument({
   const groups: Group[] = [];
   let current: Group = { heading: null, fields: [] };
   for (const f of definition.field_schema) {
+    if (f.type === "page_break") {
+      continue;
+    }
     if (f.type === "section_break") {
       if (current.fields.length > 0) groups.push(current);
       current = { heading: f.label, fields: [] };

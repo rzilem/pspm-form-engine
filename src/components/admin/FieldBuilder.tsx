@@ -41,6 +41,7 @@ const TYPE_LABELS: Record<FieldType, string> = {
   file_upload: "File upload",
   signature: "Signature",
   section_break: "Section heading",
+  page_break: "Page break (wizard)",
   html: "HTML block",
   line_items: "Line items (priced)",
   total: "Total (auto-calculated)",
@@ -258,12 +259,13 @@ function FieldCard({
   onDelete,
 }: FieldCardProps) {
   const isSectionBreak = field.type === "section_break";
+  const isPageBreak = field.type === "page_break";
   const isHtml = field.type === "html";
   const isTotal = field.type === "total";
   const isLineItems = field.type === "line_items";
-  // Display-only blocks (heading, HTML, auto-calculated total) carry no input
-  // value, so they hide the Required toggle and validation.
-  const isDisplayOnly = isSectionBreak || isHtml || isTotal;
+  // Display-only blocks (heading, page break, HTML, auto-calculated total)
+  // carry no input value, so they hide the Required toggle and validation.
+  const isDisplayOnly = isSectionBreak || isPageBreak || isHtml || isTotal;
   const showOptions = TYPES_WITH_OPTIONS.has(field.type);
   const showPlaceholder = TYPES_WITH_PLACEHOLDER.has(field.type);
   const showLengthValidation = TYPES_WITH_LENGTH_VALIDATION.has(field.type);
@@ -324,7 +326,15 @@ function FieldCard({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <TextInput
-          label={isSectionBreak ? "Heading text" : isHtml ? "Block label (admin only, not shown)" : "Label"}
+          label={
+            isSectionBreak
+              ? "Heading text"
+              : isPageBreak
+                ? "Next page title"
+                : isHtml
+                  ? "Block label (admin only, not shown)"
+                  : "Label"
+          }
           value={field.label}
           onChange={(e) => onPatch({ label: e.target.value })}
         />
@@ -395,6 +405,13 @@ function FieldCard({
             </label>
           )}
         </div>
+      )}
+
+      {isPageBreak && (
+        <p className="text-xs text-muted">
+          Splits the form into sequential pages. The title is shown on the step
+          that follows this break. No answer is stored for this field.
+        </p>
       )}
 
       {isTotal && (

@@ -53,10 +53,12 @@ export function EmbedAutoHeight({ slug }: { slug: string }) {
       attributes: true,
     });
     window.addEventListener("load", post);
+    target.addEventListener("pspm-form:remeasure", post);
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       window.removeEventListener("load", post);
+      target.removeEventListener("pspm-form:remeasure", post);
     };
   }, [slug]);
 
