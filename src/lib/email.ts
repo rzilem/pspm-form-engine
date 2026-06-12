@@ -10,6 +10,8 @@ import {
   evaluateCondition,
   lineItemTotal,
   formatMoney,
+  formatFieldDisplayText,
+  getSelectedImageChoiceOptions,
   type FormDefinition,
   type FieldDefinition,
   type NotificationRule,
@@ -289,7 +291,21 @@ function renderFieldCellHtml(field: FieldDefinition, raw: unknown): string {
     if (raw === undefined || raw === null) return "";
     return `<strong>${formatMoney(raw)}</strong>`;
   }
-  const value = formatFieldValue(raw);
+  if (field.type === "image_choice") {
+    const selections = getSelectedImageChoiceOptions(field, raw);
+    if (selections.length === 0) return "";
+    const labelText = formatFieldDisplayText(field, raw);
+    const thumbs = selections
+      .filter((s) => s.image)
+      .map(
+        (s) =>
+          `<img src="${escapeHtml(s.image!)}" alt="${escapeHtml(s.label)}" width="48" height="48" style="object-fit:cover;border-radius:4px;margin-right:6px;vertical-align:middle" />`,
+      )
+      .join("");
+    if (!thumbs) return escapeHtml(labelText);
+    return `${thumbs}<span>${escapeHtml(labelText)}</span>`;
+  }
+  const value = formatFieldDisplayText(field, raw);
   if (!value) return "";
   return escapeHtml(value);
 }
@@ -299,20 +315,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatFieldValue(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ");
-  if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>)
-      .filter((x) => x !== null && x !== undefined && String(x).trim() !== "")
-      .map((x) => String(x))
-      .join(" ");
-  }
-  return "";
 }
 
 /**

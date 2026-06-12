@@ -32,6 +32,7 @@ const TYPE_LABELS: Record<FieldType, string> = {
   number: "Number",
   radio: "Radio buttons",
   checkbox_group: "Checkboxes (multi-select)",
+  image_choice: "Image choices",
   select: "Dropdown (select)",
   date: "Date",
   time: "Time",
@@ -54,6 +55,7 @@ const TYPES_WITH_OPTIONS: ReadonlySet<FieldType> = new Set<FieldType>([
   "radio",
   "select",
   "checkbox_group",
+  "image_choice",
 ]);
 
 // Field types that take a free-text placeholder. Choice/structured types ignore it.
@@ -64,6 +66,23 @@ const TYPES_WITH_PLACEHOLDER: ReadonlySet<FieldType> = new Set<FieldType>([
   "phone",
   "number",
   "date",
+]);
+
+const TYPES_WITH_MASK: ReadonlySet<FieldType> = new Set<FieldType>([
+  "text",
+  "phone",
+]);
+
+const SCALAR_CONFIG_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
+  "text",
+  "textarea",
+  "email",
+  "phone",
+  "number",
+  "radio",
+  "select",
+  "date",
+  "time",
 ]);
 
 // Field types whose validation block exposes length + pattern controls.
@@ -87,7 +106,14 @@ const TRIGGER_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "time",
   "radio",
   "select",
+  "image_choice",
 ]);
+
+function isTriggerCapableField(f: FieldDefinition): boolean {
+  if (!TRIGGER_FIELD_TYPES.has(f.type)) return false;
+  if (f.type === "image_choice" && f.multiple) return false;
+  return true;
+}
 
 /**
  * Generate a stable, collision-free id for a NEWLY added field.
@@ -144,9 +170,13 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
       const becameNonTrigger =
         patch.type !== undefined &&
         patch.type !== prev?.type &&
-        !TRIGGER_FIELD_TYPES.has(patch.type) &&
-        TRIGGER_FIELD_TYPES.has(prev?.type as FieldType);
-      if (updated && becameNonTrigger) {
+        !isTriggerCapableField({ ...updated, type: patch.type }) &&
+        isTriggerCapableField(prev as FieldDefinition);
+      const lostTriggerViaMultiple =
+        updated?.type === "image_choice" &&
+        patch.multiple === true &&
+        !prev?.multiple;
+      if (updated && (becameNonTrigger || lostTriggerViaMultiple)) {
         const id = updated.id;
         onChange(
           next.map((f, i) =>
@@ -267,7 +297,10 @@ function FieldCard({
   // carry no input value, so they hide the Required toggle and validation.
   const isDisplayOnly = isSectionBreak || isPageBreak || isHtml || isTotal;
   const showOptions = TYPES_WITH_OPTIONS.has(field.type);
+  const isImageChoice = field.type === "image_choice";
   const showPlaceholder = TYPES_WITH_PLACEHOLDER.has(field.type);
+  const showMask = TYPES_WITH_MASK.has(field.type);
+  const showScalarConfig = SCALAR_CONFIG_TYPES.has(field.type);
   const showLengthValidation = TYPES_WITH_LENGTH_VALIDATION.has(field.type);
   const showNumberValidation = field.type === "number";
   const showValidationSection = showLengthValidation || showNumberValidation;
@@ -451,10 +484,58 @@ function FieldCard({
         />
       )}
 
+      {showMask && (
+        <TextInput
+          label="Input mask"
+          value={field.mask ?? ""}
+          onChange={(e) => onPatch({ mask: e.target.value || undefined })}
+          helperText='Optional. Tokens: 9 = digit, a = letter, * = alphanumeric (e.g. (999) 999-9999).'
+          placeholder="(999) 999-9999"
+        />
+      )}
+
+      {showScalarConfig && (
+        <div className="rounded-[8px] border border-border px-3 py-3 space-y-3">
+          <p className="text-sm font-medium text-foreground">Pre-fill</p>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={field.readOnly ?? false}
+              onChange={(e) =>
+                onPatch({ readOnly: e.target.checked || undefined })
+              }
+              className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+            />
+            Read-only (shown to submitter, still captured on submit)
+          </label>
+          <TextInput
+            label="Default value"
+            value={field.defaultValue ?? ""}
+            onChange={(e) =>
+              onPatch({ defaultValue: e.target.value || undefined })
+            }
+            helperText="Optional. Pre-fills the field on load."
+          />
+        </div>
+      )}
+
+      {isImageChoice && (
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={field.multiple ?? false}
+            onChange={(e) => onPatch({ multiple: e.target.checked || undefined })}
+            className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+          />
+          Allow multiple selections
+        </label>
+      )}
+
       {showOptions && (
         <OptionsEditor
           options={field.options ?? []}
           onChange={(options) => onPatch({ options })}
+          showImageUrl={isImageChoice}
         />
       )}
 
@@ -582,9 +663,14 @@ function NumberInput({ label, value, onChange }: NumberInputProps) {
 interface OptionsEditorProps {
   options: FieldOption[];
   onChange: (next: FieldOption[]) => void;
+  showImageUrl?: boolean;
 }
 
-function OptionsEditor({ options, onChange }: OptionsEditorProps) {
+function OptionsEditor({
+  options,
+  onChange,
+  showImageUrl = false,
+}: OptionsEditorProps) {
   const updateOption = (index: number, patch: Partial<FieldOption>) => {
     onChange(options.map((o, i) => (i === index ? { ...o, ...patch } : o)));
   };
@@ -602,29 +688,41 @@ function OptionsEditor({ options, onChange }: OptionsEditorProps) {
         <p className="text-xs text-muted">No options yet. Add at least one choice.</p>
       )}
       {options.map((opt, i) => (
-        <div key={i} className="flex items-end gap-2">
-          <TextInput
-            label="Value"
-            value={opt.value}
-            onChange={(e) => updateOption(i, { value: e.target.value })}
-            className="flex-1"
-          />
-          <TextInput
-            label="Label"
-            value={opt.label}
-            onChange={(e) => updateOption(i, { label: e.target.value })}
-            className="flex-1"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => removeOption(i)}
-            aria-label="Remove option"
-            className="!border-error !text-error hover:!bg-error-light mb-0.5"
-          >
-            ✕
-          </Button>
+        <div key={i} className="space-y-2 rounded-[8px] border border-border/60 p-2">
+          <div className="flex items-end gap-2">
+            <TextInput
+              label="Value"
+              value={opt.value}
+              onChange={(e) => updateOption(i, { value: e.target.value })}
+              className="flex-1"
+            />
+            <TextInput
+              label="Label"
+              value={opt.label}
+              onChange={(e) => updateOption(i, { label: e.target.value })}
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => removeOption(i)}
+              aria-label="Remove option"
+              className="!border-error !text-error hover:!bg-error-light mb-0.5"
+            >
+              ✕
+            </Button>
+          </div>
+          {showImageUrl && (
+            <TextInput
+              label="Image URL"
+              value={opt.image ?? ""}
+              onChange={(e) =>
+                updateOption(i, { image: e.target.value || undefined })
+              }
+              helperText="Optional. Leave blank for a label-only card."
+            />
+          )}
         </div>
       ))}
       <Button type="button" variant="outline" size="sm" onClick={addOption}>
@@ -738,7 +836,7 @@ function ConditionalEditor({
   // Candidate trigger fields: any OTHER scalar field (the resolver compares
   // with String(value), so arrays/objects/uploads/signatures can't be triggers).
   const candidates = allFields.filter(
-    (f, i) => i !== index && TRIGGER_FIELD_TYPES.has(f.type),
+    (f, i) => i !== index && isTriggerCapableField(f),
   );
 
   const candidateOptions = candidates.map((f) => ({

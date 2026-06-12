@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, use, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FormLayout } from "@/components/forms/FormLayout";
 import { Button } from "@/components/ui/Button";
 import { TextArea } from "@/components/ui/TextArea";
 import { SelectField } from "@/components/ui/SelectField";
+import {
+  formatFieldDisplayText,
+  getSelectedImageChoiceOptions,
+  type FieldDefinition,
+} from "@/lib/form-definitions";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -24,6 +29,7 @@ interface SubmissionDetail {
   form_slug: string;
   form_definition_id: string | null;
   form_title: string | null;
+  field_schema: FieldDefinition[] | null;
   data: Record<string, unknown>;
   status: "new" | "in_review" | "completed" | "spam" | "archived";
   workflow_state: {
@@ -80,6 +86,48 @@ function formatValue(v: unknown): string {
       .join(" ");
   }
   return String(v);
+}
+
+function fieldLabelForKey(
+  key: string,
+  schema: FieldDefinition[] | null | undefined,
+): string {
+  const hit = schema?.find((f) => f.id === key);
+  return hit?.label ?? key;
+}
+
+function renderSubmissionValue(
+  key: string,
+  v: unknown,
+  schema: FieldDefinition[] | null | undefined,
+): ReactNode {
+  const field = schema?.find((f) => f.id === key);
+  if (field?.type === "image_choice") {
+    const selections = getSelectedImageChoiceOptions(field, v);
+    if (selections.length === 0) return "—";
+    const text = formatFieldDisplayText(field, v);
+    const withImages = selections.filter((s) => s.image);
+    if (withImages.length === 0) return text;
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2">
+        {withImages.map((s) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={s.value}
+            src={s.image}
+            alt={s.label}
+            className="h-10 w-10 rounded object-cover border border-border"
+          />
+        ))}
+        <span>{text}</span>
+      </span>
+    );
+  }
+  if (field) {
+    const text = formatFieldDisplayText(field, v);
+    if (text) return text;
+  }
+  return formatValue(v);
 }
 
 interface UploadedFileRow {
@@ -246,6 +294,7 @@ export default function SubmissionDetailPage({
     );
   }
 
+  const schema = submission.field_schema ?? null;
   const dataEntries = Object.entries(submission.data ?? {});
 
   return (
@@ -276,7 +325,7 @@ export default function SubmissionDetailPage({
                 {dataEntries.map(([k, v]) => (
                   <tr key={k} className="border-b border-border/50">
                     <td className="py-2 pr-3 font-medium text-foreground align-top w-1/3">
-                      {k}
+                      {fieldLabelForKey(k, schema)}
                     </td>
                     <td className="py-2 text-foreground align-top whitespace-pre-wrap break-words">
                       {isUploadedFileArray(v) ? (
@@ -293,7 +342,7 @@ export default function SubmissionDetailPage({
                           className="max-h-24 border border-border rounded bg-white"
                         />
                       ) : (
-                        formatValue(v)
+                        renderSubmissionValue(k, v, schema)
                       )}
                     </td>
                   </tr>

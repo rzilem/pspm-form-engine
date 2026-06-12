@@ -232,12 +232,64 @@ function resolveImportLabel(
   return `Field ${idx + 1}`;
 }
 
+function choiceImageUrl(choice: Record<string, unknown>): string | undefined {
+  const candidates = [
+    choice.image,
+    choice.imageUrl,
+    choice.image_url,
+    choice.file_url,
+    choice.fileUrl,
+    choice.url,
+  ];
+  for (const raw of candidates) {
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        return raw.slice(0, 1000);
+      }
+    } catch {
+      // ignore invalid URLs
+    }
+  }
+  return undefined;
+}
+
+/** Detect JetSloth Image Choices (or similar GF choice fields with image metadata). */
+function detectImageChoiceField(gf: GfField): boolean {
+  const type = gf.type.toLowerCase();
+  if (
+    type.includes("image") &&
+    (type.includes("choice") || type.includes("radio") || type.includes("checkbox"))
+  ) {
+    return true;
+  }
+  const cls = (gf.cssClass ?? "").toLowerCase();
+  if (
+    cls.includes("image-choices") ||
+    cls.includes("image_choice") ||
+    cls.includes("jetsloth") ||
+    cls.includes("imagechoices")
+  ) {
+    return true;
+  }
+  if (!Array.isArray(gf.choices)) return false;
+  return gf.choices.some((c) => {
+    if (!c || typeof c !== "object") return false;
+    return Boolean(choiceImageUrl(c as Record<string, unknown>));
+  });
+}
+
 function mapField(
   gf: GfField,
   idx: number,
   warnings: ImportWarning[],
 ): FieldDefinition | null {
-  const mappedType = FIELD_TYPE_MAP[gf.type];
+  const asImageChoice = detectImageChoiceField(gf);
+  let mappedType = FIELD_TYPE_MAP[gf.type];
+  if (asImageChoice) {
+    mappedType = "image_choice";
+  }
   if (mappedType === undefined) {
     warnings.push({
       fieldLabel: gf.label ?? `(field ${idx})`,
@@ -264,17 +316,33 @@ function mapField(
   const placeholder = gf.placeholder?.slice(0, 200);
 
   let options: FieldOption[] | undefined;
-  if (gf.choices && (mappedType === "radio" || mappedType === "select" || mappedType === "checkbox_group")) {
+  if (
+    gf.choices &&
+    (mappedType === "radio" ||
+      mappedType === "select" ||
+      mappedType === "checkbox_group" ||
+      mappedType === "image_choice")
+  ) {
     options = gf.choices
       .map((c) => {
-        const value = (c.value ?? c.text ?? "").toString().slice(0, 200);
-        const opLabel = (c.text ?? c.value ?? "").toString().slice(0, 200);
+        const rec = (c ?? {}) as Record<string, unknown>;
+        const value = (rec.value ?? rec.text ?? "").toString().slice(0, 200);
+        const opLabel = (rec.text ?? rec.value ?? "").toString().slice(0, 200);
         if (!value || !opLabel) return null;
-        return { value, label: opLabel };
+        const image = mappedType === "image_choice"
+          ? choiceImageUrl(rec)
+          : undefined;
+        return image ? { value, label: opLabel, image } : { value, label: opLabel };
       })
       .filter((c): c is FieldOption => c !== null);
     if (options.length === 0) options = undefined;
   }
+
+  const imageChoiceMultiple =
+    mappedType === "image_choice" &&
+    (gf.type === "checkbox" ||
+      gf.type === "checkboxes" ||
+      (gf as Record<string, unknown>).inputType === "checkbox");
 
   const def: FieldDefinition = {
     id,
@@ -284,6 +352,7 @@ function mapField(
     helpText,
     placeholder,
     options,
+    ...(imageChoiceMultiple ? { multiple: true } : {}),
     // GF "html" blocks store their markup in `content`; carry it into our
     // html field (sanitized at render). Ignored by every other type.
     ...(mappedType === "html" && gf.content

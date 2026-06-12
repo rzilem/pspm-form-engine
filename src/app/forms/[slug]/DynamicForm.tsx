@@ -282,12 +282,15 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
       else if (
         f.type === "checkbox_group" ||
         f.type === "file_upload" ||
-        f.type === "line_items"
+        f.type === "line_items" ||
+        (f.type === "image_choice" && f.multiple)
       )
         out[f.id] = [];
       else if (f.type === "name") out[f.id] = { first: "", last: "" };
       else if (f.type === "address")
         out[f.id] = { street: "", city: "", state: "", zip: "" };
+      else if (f.defaultValue !== undefined && f.defaultValue !== "")
+        out[f.id] = f.defaultValue;
       else out[f.id] = "";
     }
     return out;

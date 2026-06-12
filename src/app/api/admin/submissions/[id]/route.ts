@@ -39,19 +39,25 @@ export async function GET(request: Request, ctx: RouteContext) {
   }
   if (!data) return Response.json({ error: "Not found" }, { status: 404 });
 
-  // Pull the linked form_definition title (if any) so the detail view
-  // doesn't have to round-trip a second query.
+  // Pull the linked form_definition title + field_schema so the detail view
+  // can render labels (e.g. image_choice option labels) without a second query.
   let formTitle: string | null = null;
+  let fieldSchema: unknown[] | null = null;
   if (data.form_definition_id) {
     const { data: def } = await supabase
       .from("form_definitions")
-      .select("title")
+      .select("title, field_schema")
       .eq("id", data.form_definition_id)
       .maybeSingle();
     formTitle = def?.title ?? null;
+    fieldSchema = Array.isArray(def?.field_schema) ? def.field_schema : null;
   }
 
-  return Response.json({ ...data, form_title: formTitle });
+  return Response.json({
+    ...data,
+    form_title: formTitle,
+    field_schema: fieldSchema,
+  });
 }
 
 export async function PATCH(request: Request, ctx: RouteContext) {

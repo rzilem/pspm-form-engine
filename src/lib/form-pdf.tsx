@@ -36,6 +36,8 @@ import {
   lineItemTotal,
   formatMoney,
   resolveVisibleFieldIds,
+  formatFieldDisplayText,
+  getSelectedImageChoiceOptions,
 } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 
@@ -155,6 +157,18 @@ const styles = StyleSheet.create({
     height: 80,
     objectFit: "contain",
   },
+  choiceThumbRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  choiceThumb: {
+    width: 36,
+    height: 36,
+    objectFit: "cover",
+    marginRight: 6,
+    borderRadius: 2,
+  },
   // Itemized line-items table (invoice-style).
   liTable: {
     marginTop: 10,
@@ -206,24 +220,6 @@ const styles = StyleSheet.create({
   },
 });
 
-// Format a single value for the PDF cell. Mirrors lib/email.ts logic so
-// the same submission renders identically across email body and PDF.
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map((v) => String(v)).filter(Boolean).join(", ");
-  }
-  if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>)
-      .filter((x) => x !== null && x !== undefined && String(x).trim() !== "")
-      .map((x) => String(x))
-      .join(" ");
-  }
-  return "";
-}
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -249,7 +245,7 @@ function wouldRenderFieldInPdf(
   if (field.type === "total") {
     return value !== undefined && value !== null;
   }
-  const text = formatValue(value);
+  const text = formatFieldDisplayText(field, value);
   return text !== "" && text !== "—";
 }
 
@@ -289,7 +285,28 @@ function renderValueCell(
   // the document body (renderLineItemsTable / renderTotalRow), not as a
   // label/value cell — so they fall through here and are skipped.
   if (field.type === "line_items" || field.type === "total") return null;
-  const text = formatValue(value);
+  if (field.type === "image_choice") {
+    const selections = getSelectedImageChoiceOptions(field, value);
+    if (selections.length === 0) return null;
+    const withImages = selections.filter((s) => s.image);
+    if (withImages.length === 0) {
+      return <Text>{formatFieldDisplayText(field, value)}</Text>;
+    }
+    return (
+      <View>
+        {selections.map((s) => (
+          <View key={s.value} style={styles.choiceThumbRow}>
+            {s.image ? (
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <Image src={s.image} style={styles.choiceThumb} />
+            ) : null}
+            <Text>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  }
+  const text = formatFieldDisplayText(field, value);
   if (text === "" || text === "—") return null;
   return <Text>{text}</Text>;
 }

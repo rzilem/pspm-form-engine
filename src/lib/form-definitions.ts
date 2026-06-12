@@ -22,6 +22,7 @@ export const FIELD_TYPES = [
   "number",
   "radio",
   "checkbox_group",
+  "image_choice",
   "select",
   "date",
   "time",
@@ -87,6 +88,8 @@ export type LineItemValue = z.infer<typeof lineItemValueSchema>;
 const fieldOptionSchema = z.object({
   value: z.string().min(1).max(200),
   label: z.string().min(1).max(200),
+  // Optional image URL for image_choice options; ignored by other field types.
+  image: z.string().url().max(1000).optional(),
 });
 export type FieldOption = z.infer<typeof fieldOptionSchema>;
 
@@ -322,6 +325,15 @@ export const fieldDefinitionSchema = z.object({
   helpText: z.string().max(500).optional(),
   placeholder: z.string().max(200).optional(),
   options: z.array(fieldOptionSchema).optional(),
+  // image_choice: when true, stores an array like checkbox_group; default false
+  // (single value like radio). Ignored by other field types.
+  multiple: z.boolean().optional(),
+  // text/phone: GF-style input mask (9=digit, a=letter, *=alphanumeric).
+  mask: z.string().max(80).optional(),
+  // Scalar fields: render non-editable but still submit the value.
+  readOnly: z.boolean().optional(),
+  // Scalar fields: initial value (also used to pre-fill read-only fields).
+  defaultValue: z.string().max(500).optional(),
   // Raw HTML body for an "html" display block (rendered sanitized; never a
   // submission value). Ignored by every other field type.
   html: z.string().max(20000).optional(),
@@ -633,6 +645,16 @@ export function buildSubmissionSchema(
       case "checkbox_group":
         leaf = z.array(z.string());
         break;
+      case "image_choice":
+        if (f.multiple) {
+          leaf = z.array(z.string());
+        } else if (f.options && f.options.length > 0) {
+          const values = f.options.map((o) => o.value) as [string, ...string[]];
+          leaf = z.enum(values);
+        } else {
+          leaf = z.string();
+        }
+        break;
       case "line_items":
         // Each row coerced/validated; the grand total is recomputed in the
         // transform below, never taken from the client.
@@ -751,6 +773,7 @@ export function buildSubmissionSchema(
       if (
         f.type === "file_upload" ||
         f.type === "checkbox_group" ||
+        (f.type === "image_choice" && f.multiple) ||
         f.type === "line_items"
       ) {
         leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
@@ -1040,6 +1063,26 @@ function stripHtmlFromUserValue(str: string): string {
   return str.replace(/<[^>]*>/g, "");
 }
 
+/** Selected image_choice options with resolved labels (and optional images). */
+export function getSelectedImageChoiceOptions(
+  field: FieldDefinition,
+  raw: unknown,
+): Array<{ value: string; label: string; image?: string }> {
+  if (field.type !== "image_choice") return [];
+  const opts = field.options ?? [];
+  const values: string[] = field.multiple
+    ? Array.isArray(raw)
+      ? raw.map((v) => String(v))
+      : []
+    : raw !== undefined && raw !== null && raw !== ""
+      ? [String(raw)]
+      : [];
+  return values.map((v) => {
+    const hit = opts.find((o) => o.value === v);
+    return { value: v, label: hit?.label ?? v, image: hit?.image };
+  });
+}
+
 /** Plain-text display value for one field (email body merge tags + plaintext part). */
 export function formatFieldDisplayText(
   field: FieldDefinition,
@@ -1087,7 +1130,18 @@ export function formatFieldDisplayText(
         .join(", ");
     }
     case "radio":
-    case "select": {
+    case "select":
+    case "image_choice": {
+      if (field.type === "image_choice" && field.multiple) {
+        if (!Array.isArray(raw) || raw.length === 0) return "";
+        const opts = field.options ?? [];
+        return raw
+          .map((v) => {
+            const hit = opts.find((o) => o.value === String(v));
+            return hit?.label ?? String(v);
+          })
+          .join(", ");
+      }
       if (raw === undefined || raw === null || raw === "") return "";
       const hit = (field.options ?? []).find((o) => o.value === String(raw));
       return hit?.label ?? String(raw);

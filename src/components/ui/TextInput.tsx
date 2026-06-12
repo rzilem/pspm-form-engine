@@ -1,6 +1,7 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useCallback } from "react";
+import { applyInputMask } from "@/lib/input-mask";
 
 interface FormFieldError {
   message?: string;
@@ -11,13 +12,39 @@ interface TextInputProps
   label: string;
   error?: FormFieldError;
   helperText?: string;
+  /** GF-style mask (9=digit, a=letter, *=alphanumeric). Formats on change. */
+  mask?: string;
 }
 
 const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
-  ({ label, error, helperText, id, required, className = "", ...props }, ref) => {
+  (
+    {
+      label,
+      error,
+      helperText,
+      id,
+      required,
+      className = "",
+      mask,
+      onChange,
+      ...props
+    },
+    ref,
+  ) => {
     const inputId = id ?? `input-${label.toLowerCase().replace(/\s+/g, "-")}`;
     const errorId = `${inputId}-error`;
     const helperId = `${inputId}-helper`;
+
+    const handleChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (mask) {
+          const formatted = applyInputMask(mask, e.target.value);
+          e.target.value = formatted;
+        }
+        onChange?.(e);
+      },
+      [mask, onChange],
+    );
 
     return (
       <div className={`flex flex-col gap-1.5 ${className}`}>
@@ -37,8 +64,9 @@ const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
           }
           className={`rounded-[8px] border px-3 py-2.5 text-base transition-colors
             focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary
-            disabled:opacity-50 disabled:cursor-not-allowed
+            disabled:opacity-50 disabled:cursor-not-allowed read-only:opacity-80 read-only:cursor-default read-only:bg-gray-50
             ${error ? "border-error bg-error-light" : "border-border bg-white hover:border-primary/50"}`}
+          onChange={handleChange}
           {...props}
         />
         {helperText && !error && (
