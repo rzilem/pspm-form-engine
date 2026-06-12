@@ -12,6 +12,7 @@ import {
   formatMoney,
   formatFieldDisplayText,
   getSelectedImageChoiceOptions,
+  resolveVisibleFieldIds,
   type FormDefinition,
   type FieldDefinition,
   type NotificationRule,
@@ -224,10 +225,14 @@ function renderDynamicEmailBody(
   def: FormDefinition,
   data: Record<string, unknown>,
 ): string {
+  const visible = resolveVisibleFieldIds(def.field_schema, data);
   const rows = def.field_schema
     .filter(
       (f: FieldDefinition) =>
-        f.type !== "section_break" && f.type !== "page_break",
+        visible.has(f.id) &&
+        f.type !== "section_break" &&
+        f.type !== "page_break" &&
+        f.type !== "html",
     )
     .map((f) => {
       const raw = data[f.id];

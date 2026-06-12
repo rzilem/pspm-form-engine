@@ -256,6 +256,19 @@ function choiceImageUrl(choice: Record<string, unknown>): string | undefined {
 }
 
 /** Detect JetSloth Image Choices (or similar GF choice fields with image metadata). */
+function gfScalarDefault(gf: GfField): string | undefined {
+  const raw = (gf as Record<string, unknown>).defaultValue;
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  return String(raw).slice(0, 500);
+}
+
+function gfInputMask(gf: GfField): string | undefined {
+  const rec = gf as Record<string, unknown>;
+  const val = rec.inputMaskValue;
+  if (typeof val !== "string" || !val.trim()) return undefined;
+  return val.trim().slice(0, 80);
+}
+
 function detectImageChoiceField(gf: GfField): boolean {
   const type = gf.type.toLowerCase();
   if (
@@ -344,6 +357,13 @@ function mapField(
       gf.type === "checkboxes" ||
       (gf as Record<string, unknown>).inputType === "checkbox");
 
+  const defaultValue = gfScalarDefault(gf);
+  const mask =
+    mappedType === "text" || mappedType === "phone"
+      ? gfInputMask(gf)
+      : undefined;
+  const isHidden = gf.type === "hidden";
+
   const def: FieldDefinition = {
     id,
     label: resolveImportLabel(mappedType, label, idx),
@@ -353,6 +373,9 @@ function mapField(
     placeholder,
     options,
     ...(imageChoiceMultiple ? { multiple: true } : {}),
+    ...(defaultValue !== undefined ? { defaultValue } : {}),
+    ...(mask !== undefined ? { mask } : {}),
+    ...(isHidden ? { readOnly: true } : {}),
     // GF "html" blocks store their markup in `content`; carry it into our
     // html field (sanitized at render). Ignored by every other type.
     ...(mappedType === "html" && gf.content

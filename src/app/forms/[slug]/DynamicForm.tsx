@@ -22,6 +22,7 @@ import {
   type FieldType,
   type FormDefinition,
 } from "@/lib/form-definitions";
+import { applyInputMask } from "@/lib/input-mask";
 import {
   getVisibleWizardPageIndices,
   getWizardPageValidationFieldIds,
@@ -289,8 +290,13 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
       else if (f.type === "name") out[f.id] = { first: "", last: "" };
       else if (f.type === "address")
         out[f.id] = { street: "", city: "", state: "", zip: "" };
-      else if (f.defaultValue !== undefined && f.defaultValue !== "")
-        out[f.id] = f.defaultValue;
+      else if (f.defaultValue !== undefined && f.defaultValue !== "") {
+        const dv = f.defaultValue;
+        out[f.id] =
+          typeof dv === "string" && f.mask
+            ? applyInputMask(f.mask, dv)
+            : dv;
+      }
       else out[f.id] = "";
     }
     return out;
