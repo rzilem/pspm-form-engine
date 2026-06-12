@@ -174,6 +174,14 @@ const VALUE_REQUIRED_OPERATORS: ReadonlySet<ConditionOperator> = new Set([
   "less_than",
 ]);
 
+/** Non-equality operators treat a blank `value` as an unfinished row → false. */
+const BLANK_VALUE_NOOP_OPERATORS: ReadonlySet<ConditionOperator> = new Set([
+  "contains",
+  "not_contains",
+  "greater_than",
+  "less_than",
+]);
+
 function isTriggerValueEmpty(raw: unknown): boolean {
   if (raw === undefined || raw === null || raw === "") return true;
   if (Array.isArray(raw)) {
@@ -199,8 +207,15 @@ function evaluateConditionRow(
   if (!isTriggerVisible(row.fieldId)) return false;
 
   // Missing `value` is invalid for comparison operators; an empty string is a
-  // valid literal target (legacy `equals: ""` gates on blank triggers).
+  // valid literal target for equals/not_equals only (legacy `equals: ""` gates
+  // on blank triggers). Blank non-equality rows are unfinished → false.
   if (VALUE_REQUIRED_OPERATORS.has(row.operator) && row.value === undefined) {
+    return false;
+  }
+  if (
+    BLANK_VALUE_NOOP_OPERATORS.has(row.operator) &&
+    String(row.value ?? "").trim() === ""
+  ) {
     return false;
   }
 
