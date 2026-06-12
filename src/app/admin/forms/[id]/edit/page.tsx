@@ -568,7 +568,9 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
                   />
                   <p className="text-xs text-muted">
                     Each rule needs <code>recipients</code> (emails or <code>{`{{field.<id>}}`}</code> tokens) and
-                    a <code>subject</code>. Optional <code>conditional</code> gates the rule on a field value.
+                    a <code>subject</code>. Optional <code>body</code> (merge tags:{" "}
+                    <code>{`{{field.<id>}}`}</code>, <code>{`{all_fields}`}</code>) overrides the default
+                    table body. Optional <code>conditional</code> gates the rule on a field value.
                   </p>
                 </section>
 

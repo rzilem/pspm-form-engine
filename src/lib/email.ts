@@ -6,10 +6,12 @@ import type { InsuranceFormData } from "@/lib/schemas-insurance";
 import { loadFormDefinition } from "@/lib/form-loader";
 import {
   resolveRecipients,
+  renderBodyTemplate,
   lineItemTotal,
   formatMoney,
   type FormDefinition,
   type FieldDefinition,
+  type NotificationRule,
 } from "@/lib/form-definitions";
 
 function escapeHtml(str: string): string {
@@ -82,7 +84,6 @@ export async function sendFormNotification(
     return;
   }
 
-  const body = renderDynamicEmailBody(def, data);
   let sent = 0;
 
   // Build the attachment list once — same PDF goes on every rule that
@@ -111,11 +112,17 @@ export async function sendFormNotification(
     }
 
     const subject = renderTemplate(rule.subject, data);
+    const { html: bodyHtml, text: bodyText } = buildDynamicNotificationBodies(
+      def,
+      data,
+      rule,
+    );
     await resend.emails.send({
       from: FROM_EMAIL,
       to: recipients,
       subject,
-      html: wrapHtml(subject, body),
+      html: wrapHtml(subject, bodyHtml),
+      text: wrapPlainText(subject, bodyText),
       ...(attachments ? { attachments } : {}),
     });
     sent++;
@@ -148,6 +155,56 @@ function renderTemplate(template: string, data: Record<string, unknown>): string
       return "";
     },
   );
+}
+
+function notificationIntroHtml(def: FormDefinition): string {
+  return `<p>A new submission was received for <strong>${escapeHtml(def.title)}</strong>.</p>`;
+}
+
+function notificationIntroText(def: FormDefinition): string {
+  return `A new submission was received for ${def.title}.`;
+}
+
+function notificationFooterHtml(): string {
+  return `<p style="color:#666;font-size:12px">File uploads are stored privately; sign in to the admin to download. Signatures are captured as images on the attached PDF.</p>`;
+}
+
+function notificationFooterText(): string {
+  return "File uploads are stored privately; sign in to the admin to download. Signatures are captured as images on the attached PDF.";
+}
+
+function buildDynamicNotificationBodies(
+  def: FormDefinition,
+  data: Record<string, unknown>,
+  rule: NotificationRule,
+): { html: string; text: string } {
+  if (rule.body?.trim()) {
+    const rendered = renderBodyTemplate(rule.body.trim(), def, data);
+    return {
+      html:
+        notificationIntroHtml(def) + rendered.html + notificationFooterHtml(),
+      text: joinPlainSections([
+        notificationIntroText(def),
+        rendered.text,
+        notificationFooterText(),
+      ]),
+    };
+  }
+
+  const html = renderDynamicEmailBody(def, data);
+  const allFieldsText = renderBodyTemplate("{all_fields}", def, data).text;
+  return {
+    html,
+    text: joinPlainSections([
+      notificationIntroText(def),
+      allFieldsText,
+      notificationFooterText(),
+    ]),
+  };
+}
+
+function joinPlainSections(parts: string[]): string {
+  return parts.filter((p) => p.trim() !== "").join("\n\n");
 }
 
 // Build a generic two-column "label | value" table from any submission.
@@ -647,10 +704,10 @@ const FORM_EMAIL_CONFIG: Record<string, EmailConfigBuilder> = {
 
 function wrapHtml(title: string, body: string): string {
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${title}</title></head>
+<html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>
 <body style="font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a">
   <div style="border-bottom:3px solid #3A4DA8;padding-bottom:12px;margin-bottom:24px">
-    <h2 style="color:#3A4DA8;margin:0">${title}</h2>
+    <h2 style="color:#3A4DA8;margin:0">${escapeHtml(title)}</h2>
     <p style="color:#666;margin:4px 0 0;font-size:13px">PS Property Management</p>
   </div>
   ${body}
@@ -658,4 +715,16 @@ function wrapHtml(title: string, body: string): string {
     <p>PS Property Management — 1490 Rusk Rd, Ste. 301, Round Rock, TX 78665 — 512-251-6122</p>
   </div>
 </body></html>`;
+}
+
+function wrapPlainText(title: string, body: string): string {
+  return [
+    title,
+    "PS Property Management",
+    "",
+    body,
+    "",
+    "—",
+    "PS Property Management — 1490 Rusk Rd, Ste. 301, Round Rock, TX 78665 — 512-251-6122",
+  ].join("\n");
 }

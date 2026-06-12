@@ -233,6 +233,10 @@ export function computeFormTotal(
 export const notificationRuleSchema = z.object({
   recipients: z.array(z.string().min(1).max(320)).min(1),
   subject: z.string().min(1).max(300),
+  // Optional custom email body (GF merge-tag parity). Supports
+  // `{{field.<id>}}` and `{all_fields}`. When omitted the sender uses the
+  // default label/value table body plus a GF-compatible plaintext part.
+  body: z.string().max(8000).optional(),
   // Optional conditional gate: only send if `data[fieldId]` matches `equals`.
   conditional: conditionalSchema.optional(),
 });
@@ -782,6 +786,232 @@ export function resolveVisibleFieldIds(
 // `{{field.<id>}}` — anything else stays literal so a plain `info@psprop.net`
 // recipient doesn't get mangled.
 const FIELD_TOKEN = /^\s*\{\{\s*field\.([a-zA-Z0-9_-]+)\s*\}\}\s*$/;
+
+// ── Notification body merge tags (GF parity) ────────────────────────────
+const BODY_FIELD_TOKEN = /\{\{\s*field\.([a-zA-Z0-9_-]+)\s*\}\}/g;
+const ALL_FIELDS_TOKEN = /\{all_fields\}/g;
+
+function escapeNotificationHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function stripHtmlFromUserValue(str: string): string {
+  return str.replace(/<[^>]*>/g, "");
+}
+
+/** Plain-text display value for one field (email body merge tags + plaintext part). */
+export function formatFieldDisplayText(
+  field: FieldDefinition,
+  raw: unknown,
+): string {
+  if (field.type === "section_break" || field.type === "html") return "";
+
+  switch (field.type) {
+    case "name": {
+      const n = (raw ?? {}) as { first?: string; last?: string };
+      return [n.first?.trim(), n.last?.trim()].filter(Boolean).join(" ");
+    }
+    case "address": {
+      const a = (raw ?? {}) as {
+        street?: string;
+        city?: string;
+        state?: string;
+        zip?: string;
+      };
+      const street = a.street?.trim() ?? "";
+      const city = a.city?.trim() ?? "";
+      const state = a.state?.trim() ?? "";
+      const zip = a.zip?.trim() ?? "";
+      const cityStateZip = [
+        city,
+        [state, zip].filter(Boolean).join(" "),
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return [street, cityStateZip].filter(Boolean).join(", ");
+    }
+    case "checkbox_group": {
+      if (!Array.isArray(raw) || raw.length === 0) return "";
+      const opts = field.options ?? [];
+      return raw
+        .map((v) => {
+          const hit = opts.find((o) => o.value === String(v));
+          return hit?.label ?? String(v);
+        })
+        .join(", ");
+    }
+    case "radio":
+    case "select": {
+      if (raw === undefined || raw === null || raw === "") return "";
+      const hit = (field.options ?? []).find((o) => o.value === String(raw));
+      return hit?.label ?? String(raw);
+    }
+    case "line_items": {
+      if (!Array.isArray(raw) || raw.length === 0) return "";
+      const useQty =
+        field.lineItemMode === "preset" || Boolean(field.allowQuantity);
+      return raw
+        .map((r) => {
+          const row = (r ?? {}) as Record<string, unknown>;
+          const desc =
+            String(row.description ?? "").trim() || "(no description)";
+          const amt = formatMoney(Number(row.amount) || 0);
+          const qty =
+            useQty &&
+            row.quantity !== undefined &&
+            row.quantity !== null &&
+            row.quantity !== ""
+              ? ` ×${row.quantity}`
+              : "";
+          return `${desc} — ${amt}${qty}`;
+        })
+        .join("\n");
+    }
+    case "total": {
+      if (raw === undefined || raw === null) return "";
+      return formatMoney(raw);
+    }
+    case "file_upload": {
+      if (!Array.isArray(raw) || raw.length === 0) return "";
+      const n = raw.length;
+      return n === 1 ? "(1 file attached)" : `(${n} files attached)`;
+    }
+    case "consent":
+      return raw === true ? "Yes" : "No";
+    case "signature":
+      return typeof raw === "string" && raw.startsWith("data:image/")
+        ? "(signed)"
+        : "";
+    default: {
+      if (raw === undefined || raw === null) return "";
+      let s = "";
+      if (typeof raw === "string") s = raw;
+      else if (typeof raw === "number" || typeof raw === "boolean")
+        s = String(raw);
+      else if (Array.isArray(raw))
+        s = raw.map((v) => String(v)).filter(Boolean).join(", ");
+      else if (typeof raw === "object") {
+        s = Object.values(raw as Record<string, unknown>)
+          .filter(
+            (x) => x !== null && x !== undefined && String(x).trim() !== "",
+          )
+          .map((x) => String(x))
+          .join(" ");
+      }
+      return stripHtmlFromUserValue(s);
+    }
+  }
+}
+
+function formatFieldDisplayHtmlCell(
+  field: FieldDefinition,
+  raw: unknown,
+): string {
+  if (field.type === "section_break" || field.type === "html") return "";
+
+  // Structured/special types share the same semantic value; escape for HTML.
+  if (
+    field.type !== "text" &&
+    field.type !== "textarea" &&
+    field.type !== "email" &&
+    field.type !== "phone" &&
+    field.type !== "number" &&
+    field.type !== "date" &&
+    field.type !== "time"
+  ) {
+    const text = formatFieldDisplayText(field, raw);
+    if (!text) return "";
+    return escapeNotificationHtml(text).replace(/\n/g, "<br>");
+  }
+
+  if (raw === undefined || raw === null) return "";
+  let s = "";
+  if (typeof raw === "string") s = raw;
+  else if (typeof raw === "number" || typeof raw === "boolean") s = String(raw);
+  if (!s.trim()) return "";
+  return escapeNotificationHtml(s);
+}
+
+function notificationFieldsForBody(
+  def: FormDefinition,
+  data: Record<string, unknown>,
+): FieldDefinition[] {
+  const visible = resolveVisibleFieldIds(def.field_schema, data);
+  return def.field_schema.filter(
+    (f) =>
+      visible.has(f.id) && f.type !== "section_break" && f.type !== "html",
+  );
+}
+
+function renderAllFieldsHtml(
+  def: FormDefinition,
+  data: Record<string, unknown>,
+): string {
+  const rows = notificationFieldsForBody(def, data)
+    .map((f) => {
+      const cellHtml = formatFieldDisplayHtmlCell(f, data[f.id]);
+      if (!cellHtml) return "";
+      return `<tr>
+        <td style="padding:6px 12px;font-weight:600;vertical-align:top;border-bottom:1px solid #f0f0f0">${escapeNotificationHtml(f.label)}</td>
+        <td style="padding:6px 12px;vertical-align:top;border-bottom:1px solid #f0f0f0">${cellHtml}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<table style="border-collapse:collapse;margin:16px 0;min-width:300px">${rows}</table>`;
+}
+
+function renderAllFieldsText(
+  def: FormDefinition,
+  data: Record<string, unknown>,
+): string {
+  return notificationFieldsForBody(def, data)
+    .map((f) => {
+      const val = formatFieldDisplayText(f, data[f.id]);
+      if (!val) return "";
+      return `${f.label}: ${val}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Expand a notification body template against submission data.
+ * Returns HTML (user values escaped) and plain text (HTML tags stripped
+ * from user values) suitable for Resend's `html` + `text` parts.
+ */
+export function renderBodyTemplate(
+  template: string,
+  def: FormDefinition,
+  data: Record<string, unknown>,
+): { html: string; text: string } {
+  const fieldsById = new Map(def.field_schema.map((f) => [f.id, f]));
+
+  const expandFieldHtml = (fieldId: string): string => {
+    const field = fieldsById.get(fieldId);
+    if (!field) return "";
+    return formatFieldDisplayHtmlCell(field, data[fieldId]);
+  };
+
+  const expandFieldText = (fieldId: string): string => {
+    const field = fieldsById.get(fieldId);
+    if (!field) return "";
+    return formatFieldDisplayText(field, data[fieldId]);
+  };
+
+  const html = template
+    .replace(ALL_FIELDS_TOKEN, () => renderAllFieldsHtml(def, data))
+    .replace(BODY_FIELD_TOKEN, (_m, fieldId: string) => expandFieldHtml(fieldId));
+
+  const text = template
+    .replace(ALL_FIELDS_TOKEN, () => renderAllFieldsText(def, data))
+    .replace(BODY_FIELD_TOKEN, (_m, fieldId: string) => expandFieldText(fieldId));
+
+  return { html, text };
+}
 
 export function resolveRecipients(
   recipients: string[],
