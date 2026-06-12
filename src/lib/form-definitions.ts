@@ -89,10 +89,204 @@ const fieldOptionSchema = z.object({
 });
 export type FieldOption = z.infer<typeof fieldOptionSchema>;
 
-const conditionalSchema = z.object({
+// ── Conditional logic (GF Conditional Logic parity) ─────────────────────
+// Accepts BOTH the legacy single-condition shape stored on imported forms
+// AND the new multi-condition shape. Everything downstream normalizes first.
+export const CONDITION_OPERATORS = [
+  "equals",
+  "not_equals",
+  "contains",
+  "not_contains",
+  "greater_than",
+  "less_than",
+  "is_empty",
+  "is_not_empty",
+] as const;
+export type ConditionOperator = (typeof CONDITION_OPERATORS)[number];
+
+const conditionOperatorSchema = z.enum(CONDITION_OPERATORS);
+
+const conditionRowSchema = z.object({
+  fieldId: z.string().min(1),
+  operator: conditionOperatorSchema,
+  value: z.string().optional(),
+});
+
+const legacyConditionalSchema = z.object({
   fieldId: z.string().min(1),
   equals: z.union([z.string(), z.array(z.string())]),
 });
+
+const multiConditionalSchema = z.object({
+  logic: z.enum(["all", "any"]),
+  conditions: z.array(conditionRowSchema).min(1),
+});
+
+export const conditionalSchema = z.union([
+  legacyConditionalSchema,
+  multiConditionalSchema,
+]);
+export type ConditionalLogic = z.infer<typeof conditionalSchema>;
+
+export type NormalizedConditionRow = {
+  fieldId: string;
+  operator: ConditionOperator;
+  value?: string;
+};
+
+export type NormalizedConditional = {
+  logic: "all" | "any";
+  conditions: NormalizedConditionRow[];
+};
+
+/** True when `c` is the legacy `{ fieldId, equals }` shape. */
+export function isLegacyConditional(
+  c: ConditionalLogic,
+): c is z.infer<typeof legacyConditionalSchema> {
+  return "equals" in c && !("logic" in c);
+}
+
+/**
+ * Map any stored conditional (legacy or new) to one internal representation.
+ * Legacy `equals: string[]` → logic "any" with one equals row per value (OR).
+ */
+export function normalizeCondition(c: ConditionalLogic): NormalizedConditional {
+  if (isLegacyConditional(c)) {
+    const values = Array.isArray(c.equals) ? c.equals : [c.equals];
+    return {
+      logic: "any",
+      conditions: values.map((v) => ({
+        fieldId: c.fieldId,
+        operator: "equals" as const,
+        value: v,
+      })),
+    };
+  }
+  return { logic: c.logic, conditions: c.conditions };
+}
+
+const VALUE_REQUIRED_OPERATORS: ReadonlySet<ConditionOperator> = new Set([
+  "equals",
+  "not_equals",
+  "contains",
+  "not_contains",
+  "greater_than",
+  "less_than",
+]);
+
+function isTriggerValueEmpty(raw: unknown): boolean {
+  if (raw === undefined || raw === null || raw === "") return true;
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return true;
+    return raw.every(
+      (v) => v === undefined || v === null || String(v).trim() === "",
+    );
+  }
+  if (typeof raw === "object") {
+    return Object.values(raw as Record<string, unknown>).every(
+      (v) => v === undefined || v === null || String(v).trim() === "",
+    );
+  }
+  return false;
+}
+
+function evaluateConditionRow(
+  row: NormalizedConditionRow,
+  values: Record<string, unknown>,
+  isTriggerVisible: (fieldId: string) => boolean,
+): boolean {
+  if (!row.fieldId) return false;
+  if (!isTriggerVisible(row.fieldId)) return false;
+
+  if (
+    VALUE_REQUIRED_OPERATORS.has(row.operator) &&
+    (row.value === undefined || row.value === "")
+  ) {
+    return false;
+  }
+
+  const tv = values[row.fieldId];
+
+  switch (row.operator) {
+    case "is_empty":
+      return isTriggerValueEmpty(tv);
+    case "is_not_empty":
+      return !isTriggerValueEmpty(tv);
+    case "equals": {
+      const expected = row.value ?? "";
+      if (Array.isArray(tv)) {
+        return tv.map((v) => String(v)).includes(expected);
+      }
+      return String(tv ?? "") === expected;
+    }
+    case "not_equals": {
+      const expected = row.value ?? "";
+      if (Array.isArray(tv)) {
+        return !tv.map((v) => String(v)).includes(expected);
+      }
+      return String(tv ?? "") !== expected;
+    }
+    case "contains": {
+      const needle = row.value ?? "";
+      if (Array.isArray(tv)) {
+        return tv.map((v) => String(v)).includes(needle);
+      }
+      return String(tv ?? "").includes(needle);
+    }
+    case "not_contains": {
+      const needle = row.value ?? "";
+      if (Array.isArray(tv)) {
+        return !tv.map((v) => String(v)).includes(needle);
+      }
+      return !String(tv ?? "").includes(needle);
+    }
+    case "greater_than":
+    case "less_than": {
+      const left = Number(tv);
+      const right = Number(row.value);
+      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+      return row.operator === "greater_than" ? left > right : left < right;
+    }
+    default:
+      return false;
+  }
+}
+
+/**
+ * Evaluate a conditional gate against submission values.
+ * `isTriggerVisible` enforces transitive hide: a condition whose trigger
+ * field is hidden counts as false (pass resolveVisibleFieldIds's `isVisible`).
+ * For notification rules (no visibility graph), pass `() => true`.
+ */
+export function evaluateCondition(
+  conditional: ConditionalLogic | undefined,
+  values: Record<string, unknown>,
+  isTriggerVisible: (fieldId: string) => boolean,
+): boolean {
+  if (!conditional) return true;
+  try {
+    const { logic, conditions } = normalizeCondition(conditional);
+    if (conditions.length === 0) return false;
+    const results = conditions.map((row) =>
+      evaluateConditionRow(row, values, isTriggerVisible),
+    );
+    return logic === "all" ? results.every(Boolean) : results.some(Boolean);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether any condition row references `fieldId` (legacy or multi shape). */
+export function conditionalReferencesField(
+  conditional: ConditionalLogic | undefined,
+  fieldId: string,
+): boolean {
+  if (!conditional) return false;
+  if (isLegacyConditional(conditional)) {
+    return conditional.fieldId === fieldId;
+  }
+  return conditional.conditions.some((c) => c.fieldId === fieldId);
+}
 
 export const fieldDefinitionSchema = z.object({
   id: z.string().min(1).max(64),
@@ -760,14 +954,7 @@ export function resolveVisibleFieldIds(
       return true;
     }
     cache.set(fieldId, false); // provisional, guards against cycles
-    const triggerId = f.conditionalOn.fieldId;
-    let vis = false;
-    if (triggerId && isVisible(triggerId)) {
-      const tv = values[triggerId];
-      vis = Array.isArray(f.conditionalOn.equals)
-        ? f.conditionalOn.equals.includes(String(tv ?? ""))
-        : String(tv ?? "") === f.conditionalOn.equals;
-    }
+    const vis = evaluateCondition(f.conditionalOn, values, isVisible);
     cache.set(fieldId, vis);
     return vis;
   }

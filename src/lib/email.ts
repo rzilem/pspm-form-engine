@@ -7,6 +7,7 @@ import { loadFormDefinition } from "@/lib/form-loader";
 import {
   resolveRecipients,
   renderBodyTemplate,
+  evaluateCondition,
   lineItemTotal,
   formatMoney,
   type FormDefinition,
@@ -93,13 +94,13 @@ export async function sendFormNotification(
     : undefined;
 
   for (const rule of rules) {
-    // Conditional gate (e.g. only notify when contactReason == "billing")
-    if (rule.conditional) {
-      const trigger = data[rule.conditional.fieldId];
-      const matches = Array.isArray(rule.conditional.equals)
-        ? rule.conditional.equals.includes(String(trigger ?? ""))
-        : String(trigger ?? "") === rule.conditional.equals;
-      if (!matches) continue;
+    // Conditional gate — shared evaluator (legacy + multi-condition shapes).
+    // Notifications have no visibility graph; trigger fields are always eligible.
+    if (
+      rule.conditional &&
+      !evaluateCondition(rule.conditional, data, () => true)
+    ) {
+      continue;
     }
 
     const recipients = resolveRecipients(rule.recipients, data);

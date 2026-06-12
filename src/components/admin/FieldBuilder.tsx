@@ -5,10 +5,17 @@ import { TextInput } from "@/components/ui/TextInput";
 import { SelectField } from "@/components/ui/SelectField";
 import { Button } from "@/components/ui/Button";
 import {
+  CONDITION_OPERATORS,
   FIELD_TYPES,
+  conditionalReferencesField,
+  isLegacyConditional,
+  normalizeCondition,
+  type ConditionOperator,
+  type ConditionalLogic,
   type FieldDefinition,
   type FieldOption,
   type FieldType,
+  type NormalizedConditionRow,
 } from "@/lib/form-definitions";
 
 interface FieldBuilderProps {
@@ -142,7 +149,7 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
         const id = updated.id;
         onChange(
           next.map((f, i) =>
-            i !== index && f.conditionalOn?.fieldId === id
+            i !== index && conditionalReferencesField(f.conditionalOn, id)
               ? { ...f, conditionalOn: undefined }
               : f,
           ),
@@ -179,7 +186,7 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
         value
           .filter((_, i) => i !== index)
           .map((other) =>
-            other.conditionalOn?.fieldId === deletedId
+            conditionalReferencesField(other.conditionalOn, deletedId ?? "")
               ? { ...other, conditionalOn: undefined }
               : other,
           ),
@@ -673,6 +680,36 @@ interface ConditionalEditorProps {
   onPatch: (patch: Partial<FieldDefinition>) => void;
 }
 
+const OPERATOR_LABELS: Record<ConditionOperator, string> = {
+  equals: "is",
+  not_equals: "is not",
+  contains: "contains",
+  not_contains: "does not contain",
+  greater_than: "is greater than",
+  less_than: "is less than",
+  is_empty: "is empty",
+  is_not_empty: "is not empty",
+};
+
+const VALUE_OPTIONAL_OPERATORS: ReadonlySet<ConditionOperator> = new Set([
+  "is_empty",
+  "is_not_empty",
+]);
+
+function toEditableConditional(
+  conditional: ConditionalLogic | undefined,
+): { logic: "all" | "any"; conditions: NormalizedConditionRow[] } | null {
+  if (!conditional) return null;
+  return normalizeCondition(conditional);
+}
+
+function fromEditableConditional(
+  logic: "all" | "any",
+  conditions: NormalizedConditionRow[],
+): ConditionalLogic {
+  return { logic, conditions };
+}
+
 function ConditionalEditor({
   field,
   allFields,
@@ -687,22 +724,60 @@ function ConditionalEditor({
     (f, i) => i !== index && TRIGGER_FIELD_TYPES.has(f.type),
   );
 
-  const equalsValue = field.conditionalOn
-    ? Array.isArray(field.conditionalOn.equals)
-      ? field.conditionalOn.equals.join(", ")
-      : field.conditionalOn.equals
-    : "";
+  const candidateOptions = candidates.map((f) => ({
+    value: f.id,
+    label: f.label || f.id,
+  }));
+
+  const editable = toEditableConditional(field.conditionalOn);
+
+  const setConditional = (
+    logic: "all" | "any",
+    conditions: NormalizedConditionRow[],
+  ) => {
+    if (conditions.length === 0) {
+      onPatch({ conditionalOn: undefined });
+      return;
+    }
+    onPatch({ conditionalOn: fromEditableConditional(logic, conditions) });
+  };
 
   const toggle = (on: boolean) => {
     if (!on) {
       onPatch({ conditionalOn: undefined });
       return;
     }
-    // Don't create a condition with no trigger — an empty fieldId fails the
-    // schema on save and the toggle is disabled in that case anyway.
     const firstId = candidates[0]?.id;
     if (!firstId) return;
-    onPatch({ conditionalOn: { fieldId: firstId, equals: "" } });
+    onPatch({
+      conditionalOn: {
+        logic: "all",
+        conditions: [{ fieldId: firstId, operator: "equals", value: "" }],
+      },
+    });
+  };
+
+  const updateRow = (rowIndex: number, patch: Partial<NormalizedConditionRow>) => {
+    if (!editable) return;
+    const next = editable.conditions.map((row, i) =>
+      i === rowIndex ? { ...row, ...patch } : row,
+    );
+    setConditional(editable.logic, next);
+  };
+
+  const addRow = () => {
+    const firstId = candidates[0]?.id;
+    if (!firstId || !editable) return;
+    setConditional(editable.logic, [
+      ...editable.conditions,
+      { fieldId: firstId, operator: "equals", value: "" },
+    ]);
+  };
+
+  const removeRow = (rowIndex: number) => {
+    if (!editable) return;
+    const next = editable.conditions.filter((_, i) => i !== rowIndex);
+    setConditional(editable.logic, next);
   };
 
   return (
@@ -719,47 +794,91 @@ function ConditionalEditor({
             onChange={(e) => toggle(e.target.checked)}
             className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
           />
-          Only show this field when another field has a specific value
+          Only show this field when conditions match
         </label>
         {candidates.length === 0 && (
           <p className="text-xs text-muted">
-            Add another (non–section-break) field to use as the trigger before
-            enabling conditional logic.
+            Add another scalar field (text, select, radio, etc.) to use as a
+            trigger before enabling conditional logic.
           </p>
         )}
 
-        {enabled && field.conditionalOn && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {enabled && editable && (
+          <div className="space-y-3">
             <SelectField
-              label="When field"
-              value={field.conditionalOn.fieldId}
+              label="Match"
+              value={editable.logic}
               onChange={(e) =>
-                onPatch({
-                  conditionalOn: {
-                    fieldId: e.target.value,
-                    equals: field.conditionalOn?.equals ?? "",
-                  },
-                })
+                setConditional(e.target.value as "all" | "any", editable.conditions)
               }
-              options={candidates.map((f) => ({
-                value: f.id,
-                label: f.label || f.id,
-              }))}
-              placeholder={candidates.length === 0 ? "No other fields" : undefined}
+              options={[
+                { value: "all", label: "All conditions (AND)" },
+                { value: "any", label: "Any condition (OR)" },
+              ]}
             />
-            <TextInput
-              label="Equals"
-              value={equalsValue}
-              onChange={(e) =>
-                onPatch({
-                  conditionalOn: {
-                    fieldId: field.conditionalOn?.fieldId ?? "",
-                    equals: e.target.value,
-                  },
-                })
-              }
-              helperText="The trigger field's value that reveals this field."
-            />
+
+            {editable.conditions.map((row, rowIndex) => (
+              <div
+                key={`${row.fieldId}-${rowIndex}`}
+                className="rounded-[8px] border border-border/80 bg-muted/20 p-3 space-y-3"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <SelectField
+                    label="Field"
+                    value={row.fieldId}
+                    onChange={(e) =>
+                      updateRow(rowIndex, { fieldId: e.target.value })
+                    }
+                    options={candidateOptions}
+                  />
+                  <SelectField
+                    label="Operator"
+                    value={row.operator}
+                    onChange={(e) =>
+                      updateRow(rowIndex, {
+                        operator: e.target.value as ConditionOperator,
+                      })
+                    }
+                    options={CONDITION_OPERATORS.map((op) => ({
+                      value: op,
+                      label: OPERATOR_LABELS[op],
+                    }))}
+                  />
+                </div>
+                {!VALUE_OPTIONAL_OPERATORS.has(row.operator) && (
+                  <TextInput
+                    label="Value"
+                    value={row.value ?? ""}
+                    onChange={(e) =>
+                      updateRow(rowIndex, { value: e.target.value })
+                    }
+                    helperText="Compared against the trigger field's current value."
+                  />
+                )}
+                {editable.conditions.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => removeRow(rowIndex)}
+                    className="!border-error !text-error hover:!bg-error-light"
+                  >
+                    Remove condition
+                  </Button>
+                )}
+              </div>
+            ))}
+
+            <Button type="button" variant="outline" size="sm" onClick={addRow}>
+              + Add condition
+            </Button>
+
+            {field.conditionalOn && isLegacyConditional(field.conditionalOn) && (
+              <p className="text-xs text-muted">
+                Loaded from a legacy single-condition rule. Saving will store the
+                new multi-condition format.
+              </p>
+            )}
           </div>
         )}
       </div>
