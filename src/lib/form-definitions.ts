@@ -260,9 +260,13 @@ function evaluateConditionRow(
     }
     case "greater_than":
     case "less_than": {
-      const left = Number(tv);
-      const right = Number(row.value);
-      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+      if (tv === undefined || tv === null || String(tv).trim() === "") {
+        return false;
+      }
+      const left = Number(String(tv).trim());
+      if (!Number.isFinite(left)) return false;
+      const right = Number(String(row.value ?? "").trim());
+      if (!Number.isFinite(right)) return false;
       return row.operator === "greater_than" ? left > right : left < right;
     }
     default:
