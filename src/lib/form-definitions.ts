@@ -198,10 +198,9 @@ function evaluateConditionRow(
   if (!row.fieldId) return false;
   if (!isTriggerVisible(row.fieldId)) return false;
 
-  if (
-    VALUE_REQUIRED_OPERATORS.has(row.operator) &&
-    (row.value === undefined || row.value === "")
-  ) {
+  // Missing `value` is invalid for comparison operators; an empty string is a
+  // valid literal target (legacy `equals: ""` gates on blank triggers).
+  if (VALUE_REQUIRED_OPERATORS.has(row.operator) && row.value === undefined) {
     return false;
   }
 
@@ -215,6 +214,9 @@ function evaluateConditionRow(
     case "equals": {
       const expected = row.value ?? "";
       if (Array.isArray(tv)) {
+        // Legacy `equals: ""` used `String(tv ?? "") === ""` (empty checkbox
+        // selection stringifies to ""); non-blank targets use element inclusion.
+        if (expected === "") return String(tv ?? "") === "";
         return tv.map((v) => String(v)).includes(expected);
       }
       return String(tv ?? "") === expected;
@@ -222,6 +224,7 @@ function evaluateConditionRow(
     case "not_equals": {
       const expected = row.value ?? "";
       if (Array.isArray(tv)) {
+        if (expected === "") return String(tv ?? "") !== "";
         return !tv.map((v) => String(v)).includes(expected);
       }
       return String(tv ?? "") !== expected;
