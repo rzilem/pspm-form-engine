@@ -22,18 +22,19 @@ function SignaturePad({
   label,
   required,
   error,
-  value = "",
+  value,
   onChange,
   className = "",
 }: SignaturePadProps) {
+  const isControlled = value !== undefined;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const padRef = useRef<SignaturePadLib | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const valueRef = useRef(value);
+  const valueRef = useRef(isControlled ? value : "");
   const restoringRef = useRef(false);
   const [isEmpty, setIsEmpty] = useState(true);
 
-  valueRef.current = value;
+  valueRef.current = isControlled ? value : "";
 
   const isSavedSignatureUrl = (url: string) =>
     /^data:image\/(png|jpe?g);base64,/.test(url);
@@ -48,6 +49,9 @@ function SignaturePad({
     const width = container.clientWidth;
     const height = 200;
 
+    const savedPoints =
+      !isControlled && pad && !pad.isEmpty() ? pad.toData() : null;
+
     canvas.width = width * ratio;
     canvas.height = height * ratio;
     canvas.style.width = `${width}px`;
@@ -58,26 +62,40 @@ function SignaturePad({
       ctx.scale(ratio, ratio);
     }
 
-    if (!pad) return !valueRef.current;
+    if (!pad) return isControlled ? !valueRef.current : true;
 
-    const savedUrl =
-      valueRef.current && isSavedSignatureUrl(valueRef.current)
-        ? valueRef.current
-        : null;
+    if (isControlled) {
+      const savedUrl =
+        valueRef.current && isSavedSignatureUrl(valueRef.current)
+          ? valueRef.current
+          : null;
 
-    if (savedUrl) {
+      if (savedUrl) {
+        restoringRef.current = true;
+        try {
+          await pad.fromDataURL(savedUrl, { ratio });
+        } finally {
+          restoringRef.current = false;
+        }
+        return pad.isEmpty();
+      }
+
+      pad.clear();
+      return true;
+    }
+
+    if (savedPoints && savedPoints.length > 0) {
       restoringRef.current = true;
       try {
-        await pad.fromDataURL(savedUrl, { ratio });
+        pad.fromData(savedPoints);
       } finally {
         restoringRef.current = false;
       }
       return pad.isEmpty();
     }
 
-    pad.clear();
-    return true;
-  }, []);
+    return pad.isEmpty();
+  }, [isControlled]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -113,9 +131,10 @@ function SignaturePad({
 
   // Controlled value changes from parent (Next/Back remount, external reset).
   useEffect(() => {
+    if (!isControlled) return;
     if (!padRef.current || restoringRef.current) return;
     void redrawFromValue().then(setIsEmpty);
-  }, [value, redrawFromValue]);
+  }, [isControlled, value, redrawFromValue]);
 
   function handleClear() {
     if (padRef.current) {

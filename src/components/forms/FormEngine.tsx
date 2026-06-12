@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import {
   FormProvider,
   useForm,
@@ -21,6 +29,21 @@ import {
 const SUBMIT_URL = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api/submit`
   : "/api/submit";
+
+const TEXT_LIKE_INPUT_TYPES = new Set([
+  "text",
+  "email",
+  "tel",
+  "url",
+  "number",
+  "password",
+  "search",
+  "date",
+  "time",
+  "datetime-local",
+  "month",
+  "week",
+]);
 
 // Optional reCAPTCHA v3. When NEXT_PUBLIC_RECAPTCHA_SITE_KEY is set (and the
 // matching RECAPTCHA_SECRET_KEY is set server-side) the form fetches a token
@@ -146,6 +169,44 @@ function FormEngine<T extends FieldValues>({
     }
   }
 
+  const wizardSubmitGuardPropRef = useRef(wizardSubmitGuardProp);
+  wizardSubmitGuardPropRef.current = wizardSubmitGuardProp;
+
+  const handleSubmitRef = useRef(handleSubmit);
+  handleSubmitRef.current = handleSubmit;
+
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
+
+  const readWizardGuardRef = useRef(readWizardGuard);
+  readWizardGuardRef.current = readWizardGuard;
+
+  const handleFormSubmit = useCallback((e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const guard = readWizardGuardRef.current();
+    if (guard && !guard.isLastPage) {
+      void guard.onAdvance();
+      return;
+    }
+    void handleSubmitRef.current((data: T) => onSubmitRef.current(data))(e);
+  }, []);
+
+  const handleFormKeyDown = useCallback((e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== "Enter") return;
+    const guard = readWizardGuardRef.current();
+    if (!guard || guard.isLastPage) return;
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.tagName === "BUTTON") return;
+    if (target.tagName === "TEXTAREA" || target.isContentEditable) return;
+    if (target instanceof HTMLInputElement) {
+      const type = target.type || "text";
+      if (!TEXT_LIKE_INPUT_TYPES.has(type)) return;
+      e.preventDefault();
+      void guard.onAdvance();
+    }
+  }, []);
+
   if (submitted) {
     return (
       <div
@@ -174,45 +235,10 @@ function FormEngine<T extends FieldValues>({
     );
   }
 
-  const TEXT_LIKE_INPUT_TYPES = new Set([
-    "text",
-    "email",
-    "tel",
-    "url",
-    "number",
-    "password",
-    "search",
-  ]);
-
-  function handleFormKeyDown(e: KeyboardEvent<HTMLFormElement>) {
-    if (e.key !== "Enter") return;
-    const guard = readWizardGuard();
-    if (!guard || guard.isLastPage) return;
-    const target = e.target;
-    if (!(target instanceof HTMLElement)) return;
-    if (target.tagName === "BUTTON") return;
-    if (target.tagName === "TEXTAREA" || target.isContentEditable) return;
-    if (target instanceof HTMLInputElement) {
-      const type = target.type || "text";
-      if (!TEXT_LIKE_INPUT_TYPES.has(type)) return;
-      e.preventDefault();
-      void guard.onAdvance();
-    }
-  }
-
-  const submitHandler = handleSubmit(async (data: T) => {
-    const guard = readWizardGuard();
-    if (guard && !guard.isLastPage) {
-      await guard.onAdvance();
-      return;
-    }
-    await onSubmit(data);
-  });
-
   return (
     <FormProvider {...methods}>
       <form
-        onSubmit={submitHandler}
+        onSubmit={handleFormSubmit}
         onKeyDown={handleFormKeyDown}
         noValidate
         className="space-y-6"
