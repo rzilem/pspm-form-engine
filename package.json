@@ -10,6 +10,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "@hookform/resolvers": "^5.2.2",
     "@react-pdf/renderer": "^4.5.1",
     "@stripe/react-stripe-js": "^6.1.0",

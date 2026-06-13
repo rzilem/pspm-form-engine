@@ -40,6 +40,32 @@ export const FIELD_TYPES = [
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
+/**
+ * Generate a stable, collision-free id for a NEWLY added field.
+ *
+ * Existing fields keep their original id (imported forms use numeric strings
+ * like "1","6" that downstream submission data + notification tokens reference
+ * — renumbering them would orphan that data). New fields get a slug of the
+ * label, or `field_<n>` when the label is empty/non-alphanumeric. The result
+ * is clamped to the 1-64 char contract below.
+ */
+export function mintFieldId(label: string, taken: ReadonlySet<string>): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 56);
+
+  const base = slug || "field";
+  if (!taken.has(base) && base.length <= 64) return base;
+
+  for (let n = 2; n < 100000; n += 1) {
+    const candidate = `${base}_${n}`.slice(0, 64);
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `field_${Date.now()}`.slice(0, 64);
+}
+
 // Shape stored in submission data for file_upload fields. The /api/upload
 // endpoint returns one of these per uploaded file; the form serializes an
 // array on submit and the resolver re-checks each path.

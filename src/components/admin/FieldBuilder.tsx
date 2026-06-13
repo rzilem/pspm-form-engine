@@ -16,6 +16,7 @@ import {
   type FieldOption,
   type FieldType,
   type NormalizedConditionRow,
+  mintFieldId,
 } from "@/lib/form-definitions";
 
 interface FieldBuilderProps {
@@ -116,33 +117,6 @@ function isTriggerCapableField(f: FieldDefinition): boolean {
   return true;
 }
 
-/**
- * Generate a stable, collision-free id for a NEWLY added field.
- *
- * Existing fields keep their original id (imported forms use numeric strings
- * like "1","6" that downstream submission data + notification tokens reference
- * — renumbering them would orphan that data). New fields get a slug of the
- * label, or `field_<n>` when the label is empty/non-alphanumeric. The result
- * is clamped to the 1-64 char contract in form-definitions.ts.
- */
-function makeFieldId(label: string, taken: ReadonlySet<string>): string {
-  const slug = label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 56);
-
-  const base = slug || "field";
-  if (!taken.has(base) && base.length <= 64) return base;
-
-  for (let n = 2; n < 100000; n += 1) {
-    const candidate = `${base}_${n}`.slice(0, 64);
-    if (!taken.has(candidate)) return candidate;
-  }
-  // Practically unreachable; guarantees a return for the type checker.
-  return `field_${Date.now()}`.slice(0, 64);
-}
-
 export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
   const updateField = useCallback(
     (index: number, patch: Partial<FieldDefinition>) => {
@@ -236,7 +210,7 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
 
   const addField = useCallback(() => {
     const taken = new Set(value.map((f) => f.id));
-    const id = makeFieldId("", taken);
+    const id = mintFieldId("", taken);
     const next: FieldDefinition = {
       id,
       label: "New field",
