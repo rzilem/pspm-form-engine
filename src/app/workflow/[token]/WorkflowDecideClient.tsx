@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { TextArea } from "@/components/ui/TextArea";
-import type {
-  FieldDefinition,
-  WorkflowHistoryEntry,
+import {
+  formatFieldDisplayText,
+  getSelectedImageChoiceOptions,
+  listRowIsMeaningful,
+  resolveListColumns,
+  type FieldDefinition,
+  type WorkflowHistoryEntry,
 } from "@/lib/form-definitions";
 
 interface ClientProps {
@@ -134,7 +138,7 @@ export function WorkflowDecideClient({
                 (f) => f.type !== "section_break" && f.type !== "page_break",
               )
               .map((f) => {
-                const display = formatFieldDisplay(f, submissionData[f.id]);
+                const display = renderFieldDisplay(f, submissionData[f.id]);
                 if (!display) return null;
                 return (
                   <tr key={f.id} className="border-b border-border/50">
@@ -213,34 +217,91 @@ export function WorkflowDecideClient({
   );
 }
 
-function formatFieldDisplay(field: FieldDefinition, value: unknown): string | null {
+function renderFieldDisplay(
+  field: FieldDefinition,
+  value: unknown,
+): ReactNode | null {
   if (value === null || value === undefined) return null;
+
   if (field.type === "signature") {
     return typeof value === "string" && value.startsWith("data:image/")
       ? "(Signature on file — see attached PDF)"
       : null;
   }
+
   if (field.type === "file_upload") {
     if (!Array.isArray(value) || value.length === 0) return null;
     return value
       .map((u) => {
-        const f = u as { filename?: string; size?: number };
+        const f = u as { filename?: string };
         return f.filename ?? "(file)";
       })
       .join(", ");
   }
-  if (typeof value === "string") return value || null;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    const text = value.map((v) => String(v)).filter(Boolean).join(", ");
-    return text || null;
+
+  if (field.type === "list") {
+    const cols = resolveListColumns(field);
+    const colIds = new Set(cols.map((c) => c.id));
+    const rows = Array.isArray(value)
+      ? value.filter((r) => listRowIsMeaningful(r, colIds))
+      : [];
+    if (rows.length === 0) return null;
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-[240px] border-collapse text-sm">
+          <thead>
+            <tr>
+              {cols.map((c) => (
+                <th
+                  key={c.id}
+                  className="border border-border bg-muted/50 px-2 py-1 text-left text-xs font-medium"
+                >
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const row = (r ?? {}) as Record<string, unknown>;
+              return (
+                <tr key={i}>
+                  {cols.map((c) => (
+                    <td key={c.id} className="border border-border px-2 py-1">
+                      {String(row[c.id] ?? "").trim() || "—"}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
   }
-  if (typeof value === "object") {
-    const text = Object.values(value as Record<string, unknown>)
-      .filter((x) => x !== null && x !== undefined && String(x).trim() !== "")
-      .map((x) => String(x))
-      .join(" ");
-    return text || null;
+
+  if (field.type === "image_choice") {
+    const selections = getSelectedImageChoiceOptions(field, value);
+    if (selections.length === 0) return null;
+    const text = formatFieldDisplayText(field, value);
+    const withImages = selections.filter((s) => s.image);
+    if (withImages.length === 0) return text || null;
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2">
+        {withImages.map((s) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={s.value}
+            src={s.image}
+            alt={s.label}
+            className="h-10 w-10 rounded object-cover border border-border"
+          />
+        ))}
+        <span>{text}</span>
+      </span>
+    );
   }
-  return null;
+
+  const text = formatFieldDisplayText(field, value);
+  return text || null;
 }
