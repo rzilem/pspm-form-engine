@@ -23,6 +23,23 @@ const promptBodySchema = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
 });
 
+function buildToolErrorResult(
+  toolUseId: string,
+  message: string,
+): Anthropic.MessageParam {
+  return {
+    role: "user",
+    content: [
+      {
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content: message,
+        is_error: true,
+      },
+    ],
+  };
+}
+
 export async function GET(request: Request) {
   if (!isAdminAuthenticated(request)) return unauthorizedResponse();
   return Response.json({ available: isAiGenerationConfigured() });
@@ -82,10 +99,19 @@ export async function POST(request: Request) {
       if (!toolBlock || toolBlock.name !== "submit_form_definition") {
         lastError = "Model did not return a form definition.";
         messages.push({ role: "assistant", content: response.content });
-        messages.push({
-          role: "user",
-          content: `You must call submit_form_definition with a valid form. Error: ${lastError}`,
-        });
+        if (toolBlock) {
+          messages.push(
+            buildToolErrorResult(
+              toolBlock.id,
+              `${lastError} You must call submit_form_definition with a valid form definition.`,
+            ),
+          );
+        } else {
+          messages.push({
+            role: "user",
+            content: `You must call submit_form_definition with a valid form. Error: ${lastError}`,
+          });
+        }
         continue;
       }
 
@@ -100,10 +126,12 @@ export async function POST(request: Request) {
 
       lastError = result.error;
       messages.push({ role: "assistant", content: response.content });
-      messages.push({
-        role: "user",
-        content: `The form output failed validation: ${result.error}. Fix and call submit_form_definition again.`,
-      });
+      messages.push(
+        buildToolErrorResult(
+          toolBlock.id,
+          `The form output failed validation: ${result.error}. Fix the issues and call submit_form_definition again.`,
+        ),
+      );
     } catch (err) {
       logger.error("AI form generation failed", { error: String(err) });
       return Response.json({ error: "AI generation failed. Try again later." }, { status: 502 });
