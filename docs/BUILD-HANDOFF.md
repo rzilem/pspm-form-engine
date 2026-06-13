@@ -242,3 +242,44 @@ for visual gain — do it carefully with the harness + Codex.
   `form_submissions`.
 - Admin password: `ADMIN_PASSWORD` env var on the service.
 - Local checkout: `C:\Users\ricky\pspm-form-engine`.
+
+---
+
+## Waves 1–9 — full Gravity Forms + add-on parity build (2026-06-13)
+
+Built via Grok Build CLI (implementation) + Codex (review-to-clean) per wave, stacked on
+`feat/form-invoice-pdf` (live rev 00020). Each wave is its own branch; tip `feat/ai-form-generation`
+contains all 9. None merged to master / not deployed yet.
+
+| Wave | Branch | Delivers (GF/add-on parity) |
+|---|---|---|
+| 1 | feat/email-body-mergetags | Email body merge tags (`{{field.x}}`,`{all_fields}`) + GF-compatible `text/plain` part (CloudMailin parser fix) |
+| 2 | feat/multi-condition-logic | Multi-condition logic: any/all + 8 operators; backward-compatible; shared resolver |
+| 3 | feat/multi-page-wizard | Dynamic multi-page wizard (`page_break`): per-step validation, progress, conditional page skip synced client↔server, signature persistence |
+| 4 | feat/image-choice-mask-readonly | Image choices (single/multi + option images), input masks, read-only + default-value fields |
+| 5 | feat/list-repeater-field | Repeating `list` field (GF List) rendered everywhere incl. workflow review |
+| 6 | feat/pdf-templates-merge | PDF templates (default/invoice/letter) + PDF-merge of uploads (pdf-lib, trusted-metadata prefilter) |
+| 7 | feat/save-and-continue | Save & Continue: partial entries + resume link (form_partials table, reCAPTCHA+visible-email gated) |
+| 8 | feat/limits-inventory | Submission limits (max entries + open/close window) + per-choice inventory; server-authoritative, fail-closed |
+| 9 | feat/ai-form-generation | AI form generation (admin-only; Claude `@anthropic-ai/sdk`; draft-only; schema-validated) |
+
+FIELD_TYPES now: text, textarea, email, phone, number, radio, checkbox_group, image_choice, select, date,
+time, name, address, consent, file_upload, signature, section_break, page_break, html, line_items, list, total.
+
+### Migrations applied to CC (`hthaomwoizcyfeduptqm`) via Supabase MCP
+- `20260612_form_save_resume.sql` — `form_partials` table + `form_definitions.save_resume_enabled` (APPLIED).
+- `20260613_form_submission_limit.sql` — `form_definitions.submission_limit` jsonb (APPLIED).
+
+### Env vars needed at DEPLOY (set on Cloud Run `pdf-engine` before the new features work live)
+- `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`, default `claude-sonnet-4-6`) — Wave 9 AI generation; unset → graceful 503.
+- (Already present) `SUPABASE_SERVICE_ROLE_KEY` — required now for forms that USE limits/inventory/save-resume (no-limit forms still work on anon key).
+- reCAPTCHA keys remain optional (honeypot covers spam).
+
+### Decisions (Ricky, 2026-06-13)
+- Stripe online payment: SKIPPED (invoice forms are doc-generators; existing Stripe code left dormant).
+- Populate Anything (dynamic choices): SKIPPED (~0 live usage; hardcode lists if ever needed).
+
+### Remaining to actually retire Gravity Forms (operational, gated on Ricky)
+Merge stack → master → deploy engine → publish forms tier-by-tier (with go-ahead) → swap each Elementor
+embed → 1-week parallel run → deactivate 37 GF plugins (~$1,350/yr). CloudMailin-fed `contact-us` is now safe
+to cut over (Wave 1); Vantaca-fed forms were already safe.
