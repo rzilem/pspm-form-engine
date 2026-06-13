@@ -31,6 +31,13 @@ function isMergeableImage(file: UploadedFile): boolean {
   );
 }
 
+/** Whether this upload will be merged (metadata-only — no download). */
+function isMergeCandidate(file: UploadedFile, mergeImages: boolean): boolean {
+  if (isPdfFile(file)) return true;
+  if (mergeImages && isMergeableImage(file)) return true;
+  return false;
+}
+
 /** Collect uploaded files from visible file_upload fields in schema order. */
 export function collectSubmissionUploads(
   definition: FormDefinition,
@@ -144,6 +151,18 @@ export async function mergeFormPdfWithUploads(
     let appendedBytes = 0;
 
     for (const file of uploads) {
+      if (!isMergeCandidate(file, cfg.mergeImages)) continue;
+
+      if (projectedSize + file.size > MAX_MERGED_BYTES) {
+        logger.warn("PDF merge: skipping upload — would exceed combined size cap", {
+          path: file.path,
+          fileSize: file.size,
+          projectedBytes: projectedSize,
+          cap: MAX_MERGED_BYTES,
+        });
+        continue;
+      }
+
       const bytes = await downloadUpload(file.path);
       if (!bytes) continue;
 
