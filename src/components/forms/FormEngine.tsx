@@ -77,6 +77,12 @@ interface FormEngineProps<T extends FieldValues> {
   hideDefaultSubmit?: boolean;
   /** Multi-page wizard: intercept submit/Enter until the last visible page. */
   wizardSubmitGuard?: FormWizardSubmitGuard | null;
+  /** Optional actions beside Submit (e.g. Save & Continue). */
+  secondaryActions?: (ctx: {
+    honeypotRef: RefObject<HTMLInputElement | null>;
+  }) => React.ReactNode;
+  /** Save & Continue token — sent on final submit to delete the partial row. */
+  resumeToken?: string;
   children: (props: {
     errors: FieldErrors<T>;
     register: ReturnType<typeof useForm<T>>["register"];
@@ -85,6 +91,7 @@ interface FormEngineProps<T extends FieldValues> {
     setValue: ReturnType<typeof useForm<T>>["setValue"];
     /** Mutate `.current` during render — never lifts guard into parent state. */
     wizardGuardRef: RefObject<FormWizardSubmitGuard | null>;
+    honeypotRef: RefObject<HTMLInputElement | null>;
   }) => React.ReactNode;
 }
 
@@ -97,6 +104,8 @@ function FormEngine<T extends FieldValues>({
   preview = false,
   hideDefaultSubmit = false,
   wizardSubmitGuard: wizardSubmitGuardProp = null,
+  secondaryActions,
+  resumeToken,
   children,
 }: FormEngineProps<T>) {
   const [submitted, setSubmitted] = useState(false);
@@ -151,7 +160,13 @@ function FormEngine<T extends FieldValues>({
       const response = await fetch(SUBMIT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formSlug, data, recaptchaToken, hp }),
+        body: JSON.stringify({
+          formSlug,
+          data,
+          recaptchaToken,
+          hp,
+          ...(resumeToken ? { resumeToken } : {}),
+        }),
       });
 
       if (!response.ok) {
@@ -250,6 +265,7 @@ function FormEngine<T extends FieldValues>({
           watch,
           setValue,
           wizardGuardRef,
+          honeypotRef,
         })}
 
         {/* Honeypot — hidden from humans, auto-filled by bots. The server
@@ -305,15 +321,18 @@ function FormEngine<T extends FieldValues>({
         )}
 
         {!hideDefaultSubmit && (
-          <Button
-            type="submit"
-            size="lg"
-            loading={isSubmitting}
-            disabled={preview}
-            className="w-full"
-          >
-            Submit
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            {secondaryActions?.({ honeypotRef })}
+            <Button
+              type="submit"
+              size="lg"
+              loading={isSubmitting}
+              disabled={preview}
+              className="w-full sm:flex-1"
+            >
+              Submit
+            </Button>
+          </div>
         )}
       </form>
     </FormProvider>

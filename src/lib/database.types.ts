@@ -331,6 +331,8 @@ export interface Database {
           workflow_config: unknown;
           confirmation_message: string;
           recaptcha_required: boolean;
+          save_resume_enabled: boolean;
+          width: string;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -348,6 +350,8 @@ export interface Database {
           workflow_config?: unknown;
           confirmation_message?: string;
           recaptcha_required?: boolean;
+          save_resume_enabled?: boolean;
+          width?: string;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -365,12 +369,58 @@ export interface Database {
           workflow_config?: unknown;
           confirmation_message?: string;
           recaptcha_required?: boolean;
+          save_resume_enabled?: boolean;
+          width?: string;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
           published_at?: string | null;
         };
         Relationships: [];
+      };
+      form_partials: {
+        Row: {
+          id: string;
+          form_id: string;
+          slug: string;
+          resume_token: string;
+          data: unknown;
+          current_page: number | null;
+          created_at: string;
+          updated_at: string;
+          expires_at: string;
+        };
+        Insert: {
+          id?: string;
+          form_id: string;
+          slug: string;
+          resume_token: string;
+          data?: unknown;
+          current_page?: number | null;
+          created_at?: string;
+          updated_at?: string;
+          expires_at?: string;
+        };
+        Update: {
+          id?: string;
+          form_id?: string;
+          slug?: string;
+          resume_token?: string;
+          data?: unknown;
+          current_page?: number | null;
+          created_at?: string;
+          updated_at?: string;
+          expires_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "form_partials_form_id_fkey";
+            columns: ["form_id"];
+            isOneToOne: false;
+            referencedRelation: "form_definitions";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       slot_holds: {
         Row: {

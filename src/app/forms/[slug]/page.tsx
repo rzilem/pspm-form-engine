@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { FormLayout } from "@/components/forms/FormLayout";
 import { EmbedAutoHeight } from "@/components/forms/EmbedAutoHeight";
 import { loadFormDefinition } from "@/lib/form-loader";
+import { loadFormPartial } from "@/lib/form-partials";
 import { DynamicForm } from "./DynamicForm";
 
 // Forms can change at any time via the admin UI; never cache this route.
@@ -11,7 +12,7 @@ export const revalidate = 0;
 
 interface PageProps {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ embed?: string }>;
+  searchParams: Promise<{ embed?: string; resume?: string }>;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -28,11 +29,31 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function DynamicFormPage({ params, searchParams }: PageProps) {
   const { slug } = await params;
-  const { embed } = await searchParams;
+  const { embed, resume } = await searchParams;
   const definition = await loadFormDefinition(slug);
 
   if (!definition) {
     notFound();
+  }
+
+  let initialValues: Record<string, unknown> | undefined;
+  let initialPage: number | undefined;
+  let resumeToken: string | undefined;
+  let resumeNotice: string | null = null;
+
+  if (resume?.trim() && definition.save_resume_enabled) {
+    const partial = await loadFormPartial(slug, resume.trim());
+    if (partial) {
+      initialValues = partial.data;
+      initialPage =
+        partial.current_page !== null && partial.current_page >= 0
+          ? partial.current_page
+          : undefined;
+      resumeToken = partial.resume_token;
+    } else if (resume.trim()) {
+      resumeNotice =
+        "We couldn't restore your saved progress — it may have expired. You can start fresh below.";
+    }
   }
 
   // Embed mode (?embed=1): drop the PSPM header/footer chrome so the form
@@ -55,7 +76,13 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
               <p className="mt-1 text-sm text-muted">{definition.description}</p>
             )}
           </div>
-          <DynamicForm definition={definition} />
+          <DynamicForm
+            definition={definition}
+            initialValues={initialValues}
+            initialPage={initialPage}
+            resumeToken={resumeToken}
+            resumeNotice={resumeNotice}
+          />
         </div>
         <EmbedAutoHeight slug={slug} />
       </main>
@@ -68,7 +95,13 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
       subtitle={definition.description ?? undefined}
       contentWidth={definition.width}
     >
-      <DynamicForm definition={definition} />
+      <DynamicForm
+        definition={definition}
+        initialValues={initialValues}
+        initialPage={initialPage}
+        resumeToken={resumeToken}
+        resumeNotice={resumeNotice}
+      />
     </FormLayout>
   );
 }

@@ -16,6 +16,7 @@ import { buildSubmissionSchema, type FormDefinition } from "@/lib/form-definitio
 import { generateFormPdf, getPdfFilename } from "@/lib/form-pdf";
 import { mergeFormPdfWithUploads } from "@/lib/form-pdf-merge";
 import { kickoffWorkflow, workflowActionUrl } from "@/lib/workflow";
+import { deleteFormPartialByToken } from "@/lib/form-partials";
 import type { z } from "zod";
 
 
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { formSlug, data, recaptchaToken, hp } = envelope.data;
+    const { formSlug, data, recaptchaToken, hp, resumeToken } = envelope.data;
 
     // Honeypot: a hidden field real users never fill. Bots auto-complete
     // every input, so a non-empty value is almost certainly a bot. Reject
@@ -231,6 +232,11 @@ export async function POST(request: Request) {
       } catch (err) {
         logger.error("intake-lead failed", { error: String(err) });
       }
+    }
+
+    // Best-effort: remove saved partial so completed forms aren't resumable.
+    if (resumeToken) {
+      await deleteFormPartialByToken(resumeToken);
     }
 
     logger.info("Form submission saved", {

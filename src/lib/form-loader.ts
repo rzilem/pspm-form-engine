@@ -88,6 +88,8 @@ export async function loadFormDefinition(
     notification_config: notifResult.data,
     pdf_config: pdfResult.data,
     workflow_config: wfResult.data,
+    // Pre-migration rows lack save_resume_enabled — default false.
+    save_resume_enabled: data.save_resume_enabled ?? false,
   });
   if (!parsed.success) {
     logger.error("Form definition envelope failed validation", {

@@ -656,6 +656,8 @@ export const formDefinitionSchema = z.object({
   workflow_config: workflowConfigSchema.default({ enabled: false, steps: [] }),
   confirmation_message: z.string().min(1).max(500),
   recaptcha_required: z.boolean(),
+  // Save & Continue: allow submitters to save progress and resume via link.
+  save_resume_enabled: z.boolean().default(false),
   // Layout width of the rendered form. "full" fills the host container
   // (near-full-width when embedded on a page); "boxed" keeps a readable
   // max-width. Defaults to "full" so existing rows (no column) and new

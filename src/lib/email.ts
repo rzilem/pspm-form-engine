@@ -746,6 +746,48 @@ const FORM_EMAIL_CONFIG: Record<string, EmailConfigBuilder> = {
   },
 };
 
+/** Best-effort email with a Save & Continue resume link. */
+export async function sendResumeLinkEmail(opts: {
+  to: string;
+  formTitle: string;
+  resumeUrl: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    logger.info("Resume link email skipped — RESEND_API_KEY not configured", {
+      formTitle: opts.formTitle,
+    });
+    return;
+  }
+
+  const subject = `Continue your ${opts.formTitle} form`;
+  const body = `
+    <p>You started filling out <strong>${escapeHtml(opts.formTitle)}</strong> and saved your progress.</p>
+    <p>Use the link below to pick up where you left off. This link expires in 30 days.</p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(opts.resumeUrl)}" style="display:inline-block;background:#3A4DA8;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">
+        Continue your form
+      </a>
+    </p>
+    <p style="font-size:13px;color:#666">Or copy this link:<br>
+      <a href="${escapeHtml(opts.resumeUrl)}">${escapeHtml(opts.resumeUrl)}</a>
+    </p>
+  `;
+
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: opts.to,
+    subject,
+    html: wrapHtml(subject, body),
+    text: wrapPlainText(
+      subject,
+      `Continue your ${opts.formTitle} form:\n${opts.resumeUrl}\n\nThis link expires in 30 days.`,
+    ),
+  });
+
+  logger.info("Resume link email sent", { formTitle: opts.formTitle });
+}
+
 // ── HTML wrapper ─────────────────────────────────────────────────────
 
 function wrapHtml(title: string, body: string): string {

@@ -328,6 +328,8 @@ export const submissionSchema = z.object({
   // Free spam protection with no external dependency (unlike reCAPTCHA,
   // which is an optional enhancement gated on a configured site/secret key).
   hp: z.string().optional(),
+  // Save & Continue: delete matching partial row after successful submit.
+  resumeToken: z.string().min(1).max(128).optional(),
 });
 
 export type SubmissionPayload = z.infer<typeof submissionSchema>;

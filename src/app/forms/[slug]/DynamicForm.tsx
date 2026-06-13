@@ -15,6 +15,7 @@ import {
 } from "@/components/forms/FormEngine";
 import { DynamicField } from "@/components/forms/DynamicField";
 import { Button } from "@/components/ui/Button";
+import { SaveAndContinueButton } from "@/components/forms/SaveAndContinue";
 import {
   buildSubmissionSchema,
   computeFormTotal,
@@ -53,6 +54,14 @@ interface DynamicFormProps {
   definition: FormDefinition;
   // Builder live-preview: render exactly as end users see it but never submit.
   preview?: boolean;
+  /** Saved partial values from ?resume= token (server-fetched). */
+  initialValues?: Record<string, unknown>;
+  /** Wizard page index from saved partial. */
+  initialPage?: number;
+  /** Existing resume token for update-in-place saves + submit cleanup. */
+  resumeToken?: string;
+  /** Shown when ?resume= was present but invalid/expired. */
+  resumeNotice?: string | null;
 }
 
 function notifyEmbedRemeasure() {
@@ -176,43 +185,48 @@ function WizardNavigation({
   preview,
   onBack,
   onNext,
+  saveSlot,
 }: {
   isFirstVisible: boolean;
   isLastVisible: boolean;
   preview: boolean;
   onBack: () => void;
   onNext: () => void;
+  saveSlot?: React.ReactNode;
 }) {
   const { formState } = useFormContext();
 
   return (
-    <div className="flex items-center justify-between gap-3 pt-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="md"
-        onClick={onBack}
-        disabled={isFirstVisible}
-        className={isFirstVisible ? "invisible" : ""}
-      >
-        Back
-      </Button>
-
-      {isLastVisible ? (
+    <div className="space-y-3 pt-2">
+      {saveSlot}
+      <div className="flex items-center justify-between gap-3">
         <Button
-          type="submit"
-          size="lg"
-          loading={formState.isSubmitting}
-          disabled={preview}
-          className="flex-1 sm:flex-none sm:min-w-[200px]"
+          type="button"
+          variant="outline"
+          size="md"
+          onClick={onBack}
+          disabled={isFirstVisible}
+          className={isFirstVisible ? "invisible" : ""}
         >
-          Submit
+          Back
         </Button>
-      ) : (
-        <Button type="button" size="md" onClick={onNext}>
-          Next
-        </Button>
-      )}
+
+        {isLastVisible ? (
+          <Button
+            type="submit"
+            size="lg"
+            loading={formState.isSubmitting}
+            disabled={preview}
+            className="flex-1 sm:flex-none sm:min-w-[200px]"
+          >
+            Submit
+          </Button>
+        ) : (
+          <Button type="button" size="md" onClick={onNext}>
+            Next
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -251,7 +265,15 @@ function renderFieldGrid(
  * recomputes the schema independently — this client copy is purely UX
  * (pre-submit error display).
  */
-export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
+export function DynamicForm({
+  definition,
+  preview = false,
+  initialValues,
+  initialPage,
+  resumeToken: initialResumeToken,
+  resumeNotice,
+}: DynamicFormProps) {
+  const [resumeToken, setResumeToken] = useState(initialResumeToken);
   const schema = useMemo(
     () => buildSubmissionSchema(definition.field_schema),
     [definition.field_schema],
@@ -308,26 +330,71 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
       }
       else out[f.id] = "";
     }
+    if (!initialValues) return out;
+    for (const [key, val] of Object.entries(initialValues)) {
+      if (val !== undefined) out[key] = val;
+    }
     return out;
-  }, [definition.field_schema]);
+  }, [definition.field_schema, initialValues]);
 
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [currentPageIndex, setCurrentPageIndex] = useState(initialPage ?? 0);
 
   useEffect(() => {
     notifyEmbedRemeasure();
   }, [currentPageIndex]);
 
   return (
-    <FormEngine
-      schema={schema}
-      formSlug={definition.slug}
-      defaultValues={defaultValues}
-      confirmationMessage={definition.confirmation_message}
-      recaptcha={definition.recaptcha_required}
-      preview={preview}
-      hideDefaultSubmit={wizardEnabled}
-    >
-      {({ watch, wizardGuardRef }) => {
+    <>
+      {resumeNotice && (
+        <div
+          className="mb-4 rounded-[8px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          role="status"
+        >
+          {resumeNotice}
+        </div>
+      )}
+      <FormEngine
+        schema={schema}
+        formSlug={definition.slug}
+        defaultValues={defaultValues}
+        confirmationMessage={definition.confirmation_message}
+        recaptcha={definition.recaptcha_required}
+        preview={preview}
+        hideDefaultSubmit={wizardEnabled}
+        resumeToken={resumeToken}
+        secondaryActions={
+          !wizardEnabled && definition.save_resume_enabled
+            ? ({ honeypotRef }) => (
+                <SaveAndContinueFlatSlot
+                  definition={definition}
+                  formSlug={definition.slug}
+                  currentPage={undefined}
+                  resumeToken={resumeToken}
+                  onToken={setResumeToken}
+                  honeypotRef={honeypotRef}
+                  preview={preview}
+                />
+              )
+            : undefined
+        }
+      >
+      {({ watch, wizardGuardRef, honeypotRef }) => {
+        const getValues = () => watch() as Record<string, unknown>;
+        const getHoneypotValue = () => honeypotRef.current?.value ?? "";
+
+        const saveSlot =
+          definition.save_resume_enabled && !preview ? (
+            <SaveAndContinueButton
+              definition={definition}
+              formSlug={definition.slug}
+              getValues={getValues}
+              currentPage={wizardEnabled ? currentPageIndex : undefined}
+              resumeToken={resumeToken}
+              onToken={setResumeToken}
+              getHoneypotValue={getHoneypotValue}
+              preview={preview}
+            />
+          ) : null;
         const values = watch() as Record<string, unknown>;
         const visible = resolveVisibleFieldIds(
           definition.field_schema,
@@ -368,10 +435,46 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
             visible={visible}
             onPageChange={setCurrentPageIndex}
             wizardGuardRef={wizardGuardRef}
+            saveSlot={saveSlot}
           />
         );
       }}
     </FormEngine>
+    </>
+  );
+}
+
+/** Flat forms: save button lives in FormEngine secondaryActions (needs form context). */
+function SaveAndContinueFlatSlot({
+  definition,
+  formSlug,
+  currentPage,
+  resumeToken,
+  onToken,
+  honeypotRef,
+  preview,
+}: {
+  definition: FormDefinition;
+  formSlug: string;
+  currentPage: number | undefined;
+  resumeToken: string | undefined;
+  onToken: (token: string) => void;
+  honeypotRef: RefObject<HTMLInputElement | null>;
+  preview?: boolean;
+}) {
+  const { watch } = useFormContext();
+  return (
+    <SaveAndContinueButton
+      definition={definition}
+      formSlug={formSlug}
+      getValues={() => watch() as Record<string, unknown>}
+      currentPage={currentPage}
+      resumeToken={resumeToken}
+      onToken={onToken}
+      getHoneypotValue={() => honeypotRef.current?.value ?? ""}
+      preview={preview}
+      className="w-full sm:w-auto"
+    />
   );
 }
 
@@ -385,6 +488,7 @@ function DynamicFormWizardBody({
   visible,
   onPageChange,
   wizardGuardRef,
+  saveSlot,
 }: {
   pages: FormWizardPage[];
   visiblePageIndices: number[];
@@ -395,6 +499,7 @@ function DynamicFormWizardBody({
   visible: Set<string>;
   onPageChange: (index: number) => void;
   wizardGuardRef: RefObject<FormWizardSubmitGuard | null>;
+  saveSlot?: React.ReactNode;
 }) {
   const { trigger } = useFormContext();
 
@@ -472,6 +577,7 @@ function DynamicFormWizardBody({
         preview={preview}
         onBack={handleBack}
         onNext={handleNext}
+        saveSlot={saveSlot}
       />
     </div>
   );

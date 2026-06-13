@@ -63,6 +63,7 @@ interface FormDefinitionRow {
   workflow_config: unknown;
   confirmation_message: string;
   recaptcha_required: boolean;
+  save_resume_enabled?: boolean;
   width?: "full" | "boxed" | null;
   published_at: string | null;
 }
@@ -90,6 +91,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [status, setStatus] = useState<"draft" | "published" | "archived">("draft");
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const [recaptchaRequired, setRecaptchaRequired] = useState(true);
+  const [saveResumeEnabled, setSaveResumeEnabled] = useState(false);
   const [width, setWidth] = useState<"full" | "boxed">("full");
   const [fields, setFields] = useState<FieldDefinition[]>([]);
   const [fieldJsonDraft, setFieldJsonDraft] = useState("[]");
@@ -137,6 +139,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       setStatus(data.status);
       setConfirmationMessage(data.confirmation_message);
       setRecaptchaRequired(data.recaptcha_required);
+      setSaveResumeEnabled(Boolean(data.save_resume_enabled));
       setWidth(data.width === "boxed" ? "boxed" : "full");
       const { fields: loadedFields, dropped } = parseFieldSchema(data.field_schema);
       setFields(loadedFields);
@@ -288,6 +291,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           status: targetStatus ?? status,
           confirmation_message: confirmationMessage,
           recaptcha_required: recaptchaRequired,
+          save_resume_enabled: saveResumeEnabled,
           width,
           field_schema: fields,
           notification_config: notificationConfig,
@@ -359,6 +363,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       workflow_config: { enabled: false, steps: [] },
       confirmation_message: confirmationMessage || "Submitted.",
       recaptcha_required: false,
+      save_resume_enabled: false,
       width,
       created_by: null,
       created_at: "",
@@ -498,6 +503,23 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
                   ]}
                 />
               </div>
+              <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={saveResumeEnabled}
+                  onChange={(e) => setSaveResumeEnabled(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+                />
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Allow Save &amp; Continue
+                  </p>
+                  <p className="text-xs text-muted mt-1">
+                    Lets submitters save progress and resume later via a unique link
+                    (Gravity Forms parity). Off by default — existing forms are unchanged.
+                  </p>
+                </div>
+              </label>
             </section>
 
             <section className="space-y-3">
