@@ -40,6 +40,39 @@ function isScalarReadOnly(field: FieldDefinition): boolean {
   return Boolean(field.readOnly && SCALAR_READONLY_TYPES.has(field.type));
 }
 
+type ChoiceOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
+
+/** Map inventoried options to display labels + sold-out disabled state. */
+function optionsWithInventory(
+  field: FieldDefinition,
+  options: FieldOption[],
+  inventoryRemaining?: Record<string, Record<string, number>>,
+): ChoiceOption[] {
+  const fieldRem = inventoryRemaining?.[field.id];
+  return options.map((opt) => {
+    if (
+      opt.inventory === undefined ||
+      !fieldRem ||
+      fieldRem[opt.value] === undefined
+    ) {
+      return { value: opt.value, label: opt.label };
+    }
+    const rem = fieldRem[opt.value];
+    if (rem <= 0) {
+      return {
+        value: opt.value,
+        label: `${opt.label} (Sold out)`,
+        disabled: true,
+      };
+    }
+    return { value: opt.value, label: `${opt.label} (${rem} left)` };
+  });
+}
+
 interface DynamicFieldProps {
   field: FieldDefinition;
   // Required by file_upload to bind /api/upload to a published form. Other
@@ -52,6 +85,8 @@ interface DynamicFieldProps {
   // Live grand total computed by the parent (DynamicForm) — only the `total`
   // field type reads it.
   computedTotal?: number;
+  /** Advisory remaining inventory per option (server re-checks on submit). */
+  inventoryRemaining?: Record<string, Record<string, number>>;
 }
 
 /**
@@ -68,6 +103,7 @@ export function DynamicField({
   formSlug,
   preview = false,
   computedTotal = 0,
+  inventoryRemaining,
 }: DynamicFieldProps) {
   const { register, formState, control } = useFormContext();
 
@@ -505,6 +541,7 @@ export function DynamicField({
             required={field.required}
             error={error}
             disabled={locked}
+            inventoryRemaining={inventoryRemaining}
             value={controllerField.value}
             onChange={controllerField.onChange}
             onBlur={controllerField.onBlur}
@@ -529,7 +566,11 @@ export function DynamicField({
             <RadioGroup
               name={field.id}
               label={field.label}
-              options={field.options ?? []}
+              options={optionsWithInventory(
+                field,
+                field.options ?? [],
+                inventoryRemaining,
+              )}
               required={field.required}
               error={error}
               value={controllerField.value ?? ""}
@@ -552,7 +593,11 @@ export function DynamicField({
           <CheckboxGroup
             name={field.id}
             label={field.label}
-            options={field.options ?? []}
+            options={optionsWithInventory(
+              field,
+              field.options ?? [],
+              inventoryRemaining,
+            )}
             required={field.required}
             error={error}
             value={Array.isArray(controllerField.value) ? controllerField.value : []}
@@ -580,7 +625,11 @@ export function DynamicField({
               required={field.required}
               error={error}
               helperText={field.helpText}
-              options={field.options ?? []}
+              options={optionsWithInventory(
+                field,
+                field.options ?? [],
+                inventoryRemaining,
+              )}
               placeholder="Select…"
               name={controllerField.name}
               value={controllerField.value ?? ""}
@@ -777,6 +826,7 @@ interface ImageChoiceFieldProps {
   required?: boolean;
   error?: { message?: string };
   disabled?: boolean;
+  inventoryRemaining?: Record<string, Record<string, number>>;
   value: unknown;
   onChange: (v: string | string[]) => void;
   onBlur?: () => void;
@@ -789,6 +839,7 @@ function ImageChoiceField({
   required,
   error,
   disabled,
+  inventoryRemaining,
   value,
   onChange,
   onBlur,
@@ -806,9 +857,32 @@ function ImageChoiceField({
         : [],
   );
 
+  const isOptionSoldOut = useCallback(
+    (opt: FieldOption) => {
+      if (opt.inventory === undefined) return false;
+      const rem = inventoryRemaining?.[field.id]?.[opt.value];
+      if (rem === undefined) return false;
+      return rem <= 0;
+    },
+    [field.id, inventoryRemaining],
+  );
+
+  const optionLabel = useCallback(
+    (opt: FieldOption) => {
+      if (opt.inventory === undefined) return opt.label;
+      const rem = inventoryRemaining?.[field.id]?.[opt.value];
+      if (rem === undefined) return opt.label;
+      if (rem <= 0) return `${opt.label} (Sold out)`;
+      return `${opt.label} (${rem} left)`;
+    },
+    [field.id, inventoryRemaining],
+  );
+
   const toggle = useCallback(
     (optValue: string) => {
       if (disabled) return;
+      const opt = options.find((o) => o.value === optValue);
+      if (opt && isOptionSoldOut(opt)) return;
       if (multiple) {
         const current = Array.isArray(value) ? value.map(String) : [];
         if (current.includes(optValue)) {
@@ -821,7 +895,7 @@ function ImageChoiceField({
       }
       onBlur?.();
     },
-    [disabled, multiple, onChange, onBlur, value],
+    [disabled, isOptionSoldOut, multiple, onChange, onBlur, options, value],
   );
 
   const focusOption = useCallback((index: number) => {
@@ -885,6 +959,8 @@ function ImageChoiceField({
       >
         {options.map((opt, index) => {
           const selected = selectedSet.has(opt.value);
+          const soldOut = isOptionSoldOut(opt);
+          const locked = disabled || soldOut;
           return (
             <button
               key={opt.value}
@@ -892,14 +968,18 @@ function ImageChoiceField({
               data-image-choice-option
               role={multiple ? "checkbox" : "radio"}
               aria-checked={selected}
-              disabled={disabled}
+              aria-disabled={soldOut || undefined}
+              disabled={locked}
               onClick={() => toggle(opt.value)}
               onKeyDown={(e) => handleKeyDown(e, index, opt.value)}
               className={`flex flex-col rounded-[8px] border-2 overflow-hidden text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40
+                ${soldOut ? "opacity-60 cursor-not-allowed" : ""}
                 ${
                   selected
                     ? "border-primary ring-2 ring-primary/30"
-                    : "border-border hover:border-primary/50"
+                    : soldOut
+                      ? "border-border bg-gray-50"
+                      : "border-border hover:border-primary/50"
                 }`}
             >
               {opt.image ? (
@@ -917,7 +997,7 @@ function ImageChoiceField({
                 </div>
               )}
               <span className="px-2 py-2 text-sm text-foreground text-center">
-                {opt.label}
+                {optionLabel(opt)}
               </span>
             </button>
           );

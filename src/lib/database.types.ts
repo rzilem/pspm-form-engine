@@ -332,6 +332,7 @@ export interface Database {
           confirmation_message: string;
           recaptcha_required: boolean;
           save_resume_enabled: boolean;
+          submission_limit: unknown;
           width: string;
           created_by: string | null;
           created_at: string;
@@ -351,6 +352,7 @@ export interface Database {
           confirmation_message?: string;
           recaptcha_required?: boolean;
           save_resume_enabled?: boolean;
+          submission_limit?: unknown;
           width?: string;
           created_by?: string | null;
           created_at?: string;
@@ -370,6 +372,7 @@ export interface Database {
           confirmation_message?: string;
           recaptcha_required?: boolean;
           save_resume_enabled?: boolean;
+          submission_limit?: unknown;
           width?: string;
           created_by?: string | null;
           created_at?: string;

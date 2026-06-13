@@ -7,6 +7,7 @@ interface FormFieldError {
 interface CheckboxOption {
   label: string;
   value: string;
+  disabled?: boolean;
 }
 
 interface CheckboxGroupProps {
@@ -55,15 +56,22 @@ function CheckboxGroup({
         {options.map((option) => {
           const optionId = `${groupId}-${option.value.toLowerCase().replace(/\s+/g, "-")}`;
           const isChecked = value.includes(option.value);
+          const soldOut = Boolean(option.disabled);
           return (
             <label
               key={option.value}
               htmlFor={optionId}
-              className={`flex items-center gap-3 rounded-[8px] border px-4 py-3 cursor-pointer
-                transition-colors text-sm
-                ${isChecked
+              aria-disabled={soldOut || undefined}
+              className={`flex items-center gap-3 rounded-[8px] border px-4 py-3 text-sm transition-colors
+                ${soldOut
+                  ? "cursor-not-allowed opacity-60 border-border bg-gray-50"
+                  : "cursor-pointer"
+                }
+                ${!soldOut && isChecked
                   ? "border-primary bg-primary-light text-primary font-medium"
-                  : "border-border hover:border-primary/50 hover:bg-primary/[0.02]"
+                  : !soldOut
+                    ? "border-border hover:border-primary/50 hover:bg-primary/[0.02]"
+                    : "border-border"
                 }
                 ${error ? "border-error" : ""}`}
             >
@@ -73,8 +81,9 @@ function CheckboxGroup({
                 name={name}
                 value={option.value}
                 checked={isChecked}
+                disabled={soldOut}
                 onChange={(e) => handleChange(option.value, e.target.checked)}
-                className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+                className="w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
               />
               <span>{option.label}</span>
             </label>

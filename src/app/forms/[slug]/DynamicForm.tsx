@@ -62,6 +62,8 @@ interface DynamicFormProps {
   resumeToken?: string;
   /** Shown when ?resume= was present but invalid/expired. */
   resumeNotice?: string | null;
+  /** Per-field per-option remaining inventory (advisory; server re-checks). */
+  inventoryRemaining?: Record<string, Record<string, number>>;
 }
 
 function notifyEmbedRemeasure() {
@@ -236,6 +238,7 @@ function renderFieldGrid(
   definition: FormDefinition,
   preview: boolean,
   computedTotal: number,
+  inventoryRemaining?: Record<string, Record<string, number>>,
 ) {
   return (
     <div className="@container">
@@ -250,6 +253,7 @@ function renderFieldGrid(
               formSlug={definition.slug}
               preview={preview}
               computedTotal={computedTotal}
+              inventoryRemaining={inventoryRemaining}
             />
           </div>
         ))}
@@ -272,6 +276,7 @@ export function DynamicForm({
   initialPage,
   resumeToken: initialResumeToken,
   resumeNotice,
+  inventoryRemaining,
 }: DynamicFormProps) {
   const [resumeToken, setResumeToken] = useState(initialResumeToken);
   const schema = useMemo(
@@ -417,6 +422,7 @@ export function DynamicForm({
                 definition,
                 preview,
                 computedTotal,
+                inventoryRemaining,
               )}
             </>
           );
@@ -436,6 +442,7 @@ export function DynamicForm({
             onPageChange={setCurrentPageIndex}
             wizardGuardRef={wizardGuardRef}
             saveSlot={saveSlot}
+            inventoryRemaining={inventoryRemaining}
           />
         );
       }}
@@ -489,6 +496,7 @@ function DynamicFormWizardBody({
   onPageChange,
   wizardGuardRef,
   saveSlot,
+  inventoryRemaining,
 }: {
   pages: FormWizardPage[];
   visiblePageIndices: number[];
@@ -500,6 +508,7 @@ function DynamicFormWizardBody({
   onPageChange: (index: number) => void;
   wizardGuardRef: RefObject<FormWizardSubmitGuard | null>;
   saveSlot?: React.ReactNode;
+  inventoryRemaining?: Record<string, Record<string, number>>;
 }) {
   const { trigger } = useFormContext();
 
@@ -568,7 +577,13 @@ function DynamicFormWizardBody({
         aria-label={`Step ${visiblePageIndices.indexOf(activePageIndex) + 1}: ${currentPageLabel}`}
       >
         <h2 className="text-lg font-semibold text-navy">{currentPageLabel}</h2>
-        {renderFieldGrid(currentFields, definition, preview, computedTotal)}
+        {renderFieldGrid(
+          currentFields,
+          definition,
+          preview,
+          computedTotal,
+          inventoryRemaining,
+        )}
       </div>
 
       <WizardNavigation

@@ -13,6 +13,7 @@ import {
   fieldDefinitionSchema,
   type FieldDefinition,
   type FormDefinition,
+  type SubmissionLimit,
 } from "@/lib/form-definitions";
 import { z } from "zod";
 
@@ -64,6 +65,7 @@ interface FormDefinitionRow {
   confirmation_message: string;
   recaptcha_required: boolean;
   save_resume_enabled?: boolean;
+  submission_limit?: SubmissionLimit | null;
   width?: "full" | "boxed" | null;
   published_at: string | null;
 }
@@ -72,6 +74,27 @@ function getPassword(): string {
   return typeof document !== "undefined"
     ? document.cookie.match(/admin_token=([^;]+)/)?.[1] ?? ""
     : "";
+}
+
+function buildSubmissionLimitFromEditor(
+  maxEntries: string,
+  openAt: string,
+  closeAt: string,
+  limitReachedMessage: string,
+  closedMessage: string,
+): SubmissionLimit {
+  const out: SubmissionLimit = {};
+  const max = maxEntries.trim() ? Number(maxEntries.trim()) : NaN;
+  if (Number.isFinite(max) && max > 0 && Number.isInteger(max)) {
+    out.maxEntries = max;
+  }
+  if (openAt.trim()) out.openAt = openAt.trim();
+  if (closeAt.trim()) out.closeAt = closeAt.trim();
+  if (limitReachedMessage.trim()) {
+    out.limitReachedMessage = limitReachedMessage.trim();
+  }
+  if (closedMessage.trim()) out.closedMessage = closedMessage.trim();
+  return out;
 }
 
 export default function EditFormPage({ params }: { params: Promise<{ id: string }> }) {
@@ -92,6 +115,11 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const [recaptchaRequired, setRecaptchaRequired] = useState(true);
   const [saveResumeEnabled, setSaveResumeEnabled] = useState(false);
+  const [limitMaxEntries, setLimitMaxEntries] = useState("");
+  const [limitOpenAt, setLimitOpenAt] = useState("");
+  const [limitCloseAt, setLimitCloseAt] = useState("");
+  const [limitReachedMessage, setLimitReachedMessage] = useState("");
+  const [limitClosedMessage, setLimitClosedMessage] = useState("");
   const [width, setWidth] = useState<"full" | "boxed">("full");
   const [fields, setFields] = useState<FieldDefinition[]>([]);
   const [fieldJsonDraft, setFieldJsonDraft] = useState("[]");
@@ -140,6 +168,14 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       setConfirmationMessage(data.confirmation_message);
       setRecaptchaRequired(data.recaptcha_required);
       setSaveResumeEnabled(Boolean(data.save_resume_enabled));
+      const sl = (data.submission_limit ?? {}) as SubmissionLimit;
+      setLimitMaxEntries(
+        sl.maxEntries !== undefined ? String(sl.maxEntries) : "",
+      );
+      setLimitOpenAt(sl.openAt ?? "");
+      setLimitCloseAt(sl.closeAt ?? "");
+      setLimitReachedMessage(sl.limitReachedMessage ?? "");
+      setLimitClosedMessage(sl.closedMessage ?? "");
       setWidth(data.width === "boxed" ? "boxed" : "full");
       const { fields: loadedFields, dropped } = parseFieldSchema(data.field_schema);
       setFields(loadedFields);
@@ -292,6 +328,13 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           confirmation_message: confirmationMessage,
           recaptcha_required: recaptchaRequired,
           save_resume_enabled: saveResumeEnabled,
+          submission_limit: buildSubmissionLimitFromEditor(
+            limitMaxEntries,
+            limitOpenAt,
+            limitCloseAt,
+            limitReachedMessage,
+            limitClosedMessage,
+          ),
           width,
           field_schema: fields,
           notification_config: notificationConfig,
@@ -364,6 +407,7 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       confirmation_message: confirmationMessage || "Submitted.",
       recaptcha_required: false,
       save_resume_enabled: false,
+      submission_limit: {},
       width,
       created_by: null,
       created_at: "",
@@ -520,6 +564,54 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
                   </p>
                 </div>
               </label>
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+                Submission limits
+              </h2>
+              <p className="text-xs text-muted">
+                Optional caps and scheduling (Gravity Wiz Limit Submissions parity).
+                Leave blank for no limit — existing forms stay unchanged.
+              </p>
+              <TextInput
+                label="Max entries"
+                type="number"
+                min={1}
+                value={limitMaxEntries}
+                onChange={(e) => setLimitMaxEntries(e.target.value)}
+                helperText="Close the form after this many submissions."
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <TextInput
+                  label="Open date"
+                  type="datetime-local"
+                  value={limitOpenAt}
+                  onChange={(e) => setLimitOpenAt(e.target.value)}
+                  helperText="Form hidden until this time."
+                />
+                <TextInput
+                  label="Close date"
+                  type="datetime-local"
+                  value={limitCloseAt}
+                  onChange={(e) => setLimitCloseAt(e.target.value)}
+                  helperText="Form closes at this time."
+                />
+              </div>
+              <TextArea
+                label="Limit reached message"
+                value={limitReachedMessage}
+                onChange={(e) => setLimitReachedMessage(e.target.value)}
+                rows={2}
+                helperText="Shown when max entries is reached. Default: form no longer accepting submissions."
+              />
+              <TextArea
+                label="Closed / not-yet-open message"
+                value={limitClosedMessage}
+                onChange={(e) => setLimitClosedMessage(e.target.value)}
+                rows={2}
+                helperText="Shown before open date or after close date. Defaults vary by reason."
+              />
             </section>
 
             <section className="space-y-3">

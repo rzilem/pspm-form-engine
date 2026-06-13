@@ -12,7 +12,19 @@ import { getSupabase } from "@/lib/supabase";
 import { sendFormNotification, sendWorkflowAssignmentEmail } from "@/lib/email";
 import { verifyRecaptcha } from "@/lib/recaptcha";
 import { loadFormDefinition } from "@/lib/form-loader";
-import { buildSubmissionSchema, type FormDefinition } from "@/lib/form-definitions";
+import {
+  aggregateInventoryUsage,
+  buildSubmissionSchema,
+  evaluateSubmissionLimit,
+  formHasInventory,
+  resolveVisibleFieldIds,
+  validateInventoryForSubmission,
+  type FormDefinition,
+} from "@/lib/form-definitions";
+import {
+  countFormSubmissions,
+  fetchSubmissionDataRows,
+} from "@/lib/form-submission-stats";
 import { generateFormPdf, getPdfFilename } from "@/lib/form-pdf";
 import { mergeFormPdfWithUploads } from "@/lib/form-pdf-merge";
 import { kickoffWorkflow, workflowActionUrl } from "@/lib/workflow";
@@ -104,6 +116,25 @@ export async function POST(request: Request) {
       formDefinitionId = definition.id;
       formDefinition = definition;
       recaptchaRequired = definition.recaptcha_required;
+
+      // Server-authoritative submission limits (stale open pages cannot post).
+      const entryCount = await countFormSubmissions(definition.id);
+      const limitStatus = evaluateSubmissionLimit(
+        definition.submission_limit,
+        entryCount,
+        new Date(),
+      );
+      if (!limitStatus.open) {
+        logger.warn("Submission rejected — form closed", {
+          formSlug,
+          reason: limitStatus.reason,
+          entryCount,
+        });
+        return Response.json(
+          { error: limitStatus.message },
+          { status: 403 },
+        );
+      }
     }
 
     // Verify reCAPTCHA — legacy forms always require it; dynamic forms
@@ -132,6 +163,36 @@ export async function POST(request: Request) {
       );
     }
 
+    const validatedData = formResult.data as Record<string, unknown>;
+
+    // Server-authoritative inventory check before insert.
+    // Best-effort under concurrency — count-then-insert race is acceptable
+    // for low-volume HOA forms (no distributed locking).
+    if (formDefinition && formHasInventory(formDefinition.field_schema)) {
+      const rows = await fetchSubmissionDataRows(formDefinition.id);
+      const usage = aggregateInventoryUsage(
+        formDefinition.field_schema,
+        rows,
+      );
+      const visible = resolveVisibleFieldIds(
+        formDefinition.field_schema,
+        validatedData,
+      );
+      const invCheck = validateInventoryForSubmission(
+        formDefinition.field_schema,
+        validatedData,
+        usage,
+        visible,
+      );
+      if (!invCheck.ok) {
+        logger.warn("Submission rejected — inventory sold out", {
+          formSlug,
+          message: invCheck.message,
+        });
+        return Response.json({ error: invCheck.message }, { status: 403 });
+      }
+    }
+
     // Save to Supabase
     const supabase = getSupabase();
     const ip = request.headers.get("x-forwarded-for") ?? request.headers.get("cf-connecting-ip") ?? null;
@@ -142,7 +203,7 @@ export async function POST(request: Request) {
       .insert({
         form_slug: formSlug,
         form_definition_id: formDefinitionId,
-        data: formResult.data as Record<string, unknown>,
+        data: validatedData,
         ip_address: ip,
         user_agent: userAgent,
       })

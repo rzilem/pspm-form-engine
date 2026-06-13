@@ -655,15 +655,17 @@ interface NumberInputProps {
   label: string;
   value: number | undefined;
   onChange: (n: number | undefined) => void;
+  helperText?: string;
 }
 
 // Wraps TextInput for numeric values: empty string clears to undefined so an
 // optional bound isn't forced to 0.
-function NumberInput({ label, value, onChange }: NumberInputProps) {
+function NumberInput({ label, value, onChange, helperText }: NumberInputProps) {
   return (
     <TextInput
       label={label}
       type="number"
+      helperText={helperText}
       value={value ?? ""}
       onChange={(e) => {
         const raw = e.target.value;
@@ -741,6 +743,16 @@ function OptionsEditor({
               helperText="Optional. Leave blank for a label-only card."
             />
           )}
+          <NumberInput
+            label="Inventory (max selections)"
+            value={opt.inventory}
+            onChange={(n) =>
+              updateOption(i, {
+                inventory: n !== undefined && n >= 0 ? Math.floor(n) : undefined,
+              })
+            }
+            helperText="Optional. Cap how many times this choice can be selected across all submissions."
+          />
         </div>
       ))}
       <Button type="button" variant="outline" size="sm" onClick={addOption}>

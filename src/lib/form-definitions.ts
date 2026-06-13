@@ -140,8 +140,217 @@ const fieldOptionSchema = z.object({
   label: z.string().min(1).max(200),
   // Optional image URL for image_choice options; ignored by other field types.
   image: z.string().url().max(1000).optional(),
+  // Per-choice cap (Gravity Wiz Inventory). Ignored when absent.
+  inventory: z.number().int().nonnegative().optional(),
 });
 export type FieldOption = z.infer<typeof fieldOptionSchema>;
+
+// ── Submission limits (form-level open/close) ─────────────────────────
+export const submissionLimitSchema = z
+  .object({
+    maxEntries: z.number().int().positive().optional(),
+    openAt: z.string().optional(),
+    closeAt: z.string().optional(),
+    limitReachedMessage: z.string().max(2000).optional(),
+    closedMessage: z.string().max(2000).optional(),
+  })
+  .default({});
+export type SubmissionLimit = z.infer<typeof submissionLimitSchema>;
+
+export type SubmissionLimitReason =
+  | "not_yet_open"
+  | "closed_date"
+  | "limit_reached";
+
+export type SubmissionLimitStatus = {
+  open: boolean;
+  reason?: SubmissionLimitReason;
+  message: string;
+};
+
+const DEFAULT_NOT_YET_OPEN = "This form is not yet open.";
+const DEFAULT_CLOSED = "This form is closed.";
+const DEFAULT_LIMIT_REACHED =
+  "This form is no longer accepting submissions.";
+
+function parseLimitDate(raw: string | undefined): Date | null {
+  if (!raw?.trim()) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Pure: inject `now` — never call Date.now() here (testable). */
+export function evaluateSubmissionLimit(
+  config: SubmissionLimit,
+  entryCount: number,
+  now: Date,
+): SubmissionLimitStatus {
+  const limit = config ?? {};
+  const hasMax =
+    limit.maxEntries !== undefined && limit.maxEntries > 0;
+  const openAt = parseLimitDate(limit.openAt);
+  const closeAt = parseLimitDate(limit.closeAt);
+
+  if (!hasMax && !openAt && !closeAt) {
+    return { open: true, message: "" };
+  }
+
+  if (openAt && now < openAt) {
+    return {
+      open: false,
+      reason: "not_yet_open",
+      message:
+        limit.closedMessage?.trim() || DEFAULT_NOT_YET_OPEN,
+    };
+  }
+
+  if (closeAt && now >= closeAt) {
+    return {
+      open: false,
+      reason: "closed_date",
+      message: limit.closedMessage?.trim() || DEFAULT_CLOSED,
+    };
+  }
+
+  if (hasMax && entryCount >= limit.maxEntries!) {
+    return {
+      open: false,
+      reason: "limit_reached",
+      message:
+        limit.limitReachedMessage?.trim() || DEFAULT_LIMIT_REACHED,
+    };
+  }
+
+  return { open: true, message: "" };
+}
+
+// ── Inventory (per-choice caps) ─────────────────────────────────────────
+export const INVENTORY_FIELD_TYPES = new Set<FieldType>([
+  "radio",
+  "select",
+  "checkbox_group",
+  "image_choice",
+]);
+
+export function fieldHasInventory(field: FieldDefinition): boolean {
+  if (!INVENTORY_FIELD_TYPES.has(field.type)) return false;
+  return (field.options ?? []).some(
+    (o) => o.inventory !== undefined && o.inventory >= 0,
+  );
+}
+
+export function formHasInventory(fields: FieldDefinition[]): boolean {
+  return fields.some(fieldHasInventory);
+}
+
+/** Whether a stored submission row selected `optionValue` for `field`. */
+export function submissionSelectsOption(
+  field: FieldDefinition,
+  data: Record<string, unknown>,
+  optionValue: string,
+): boolean {
+  const raw = data[field.id];
+  if (
+    field.type === "checkbox_group" ||
+    (field.type === "image_choice" && field.multiple)
+  ) {
+    return (
+      Array.isArray(raw) && raw.map((v) => String(v)).includes(optionValue)
+    );
+  }
+  return raw !== undefined && raw !== null && String(raw) === optionValue;
+}
+
+/** Count selections per inventoried option across submission rows. */
+export function aggregateInventoryUsage(
+  fields: FieldDefinition[],
+  submissions: ReadonlyArray<{ data: Record<string, unknown> }>,
+): Record<string, Record<string, number>> {
+  const usage: Record<string, Record<string, number>> = {};
+  for (const field of fields) {
+    if (!fieldHasInventory(field)) continue;
+    for (const opt of field.options ?? []) {
+      if (opt.inventory === undefined) continue;
+      if (!usage[field.id]) usage[field.id] = {};
+      usage[field.id][opt.value] = 0;
+    }
+  }
+  for (const sub of submissions) {
+    const data = sub.data ?? {};
+    for (const field of fields) {
+      if (!fieldHasInventory(field)) continue;
+      for (const opt of field.options ?? []) {
+        if (opt.inventory === undefined) continue;
+        if (submissionSelectsOption(field, data, opt.value)) {
+          usage[field.id][opt.value] =
+            (usage[field.id][opt.value] ?? 0) + 1;
+        }
+      }
+    }
+  }
+  return usage;
+}
+
+/** Remaining slots per inventoried option (0 = sold out). */
+export function computeInventoryRemaining(
+  fields: FieldDefinition[],
+  usage: Record<string, Record<string, number>>,
+): Record<string, Record<string, number>> {
+  const remaining: Record<string, Record<string, number>> = {};
+  for (const field of fields) {
+    if (!fieldHasInventory(field)) continue;
+    for (const opt of field.options ?? []) {
+      if (opt.inventory === undefined) continue;
+      const used = usage[field.id]?.[opt.value] ?? 0;
+      if (!remaining[field.id]) remaining[field.id] = {};
+      remaining[field.id][opt.value] = Math.max(0, opt.inventory - used);
+    }
+  }
+  return remaining;
+}
+
+function selectedOptionValues(
+  field: FieldDefinition,
+  raw: unknown,
+): string[] {
+  if (
+    field.type === "checkbox_group" ||
+    (field.type === "image_choice" && field.multiple)
+  ) {
+    return Array.isArray(raw) ? raw.map((v) => String(v)) : [];
+  }
+  if (raw === undefined || raw === null || raw === "") return [];
+  return [String(raw)];
+}
+
+/**
+ * Server-authoritative inventory check against current usage counts.
+ * Best-effort under concurrency (count-then-insert race acceptable for HOA volume).
+ */
+export function validateInventoryForSubmission(
+  fields: FieldDefinition[],
+  data: Record<string, unknown>,
+  usage: Record<string, Record<string, number>>,
+  visibleFieldIds?: Set<string>,
+): { ok: true } | { ok: false; message: string } {
+  const visible = visibleFieldIds ?? resolveVisibleFieldIds(fields, data);
+  for (const field of fields) {
+    if (!visible.has(field.id) || !fieldHasInventory(field)) continue;
+    const selected = selectedOptionValues(field, data[field.id]);
+    for (const val of selected) {
+      const opt = (field.options ?? []).find((o) => o.value === val);
+      if (!opt || opt.inventory === undefined) continue;
+      const used = usage[field.id]?.[val] ?? 0;
+      if (used >= opt.inventory) {
+        return {
+          ok: false,
+          message: `"${opt.label}" is sold out and cannot be selected.`,
+        };
+      }
+    }
+  }
+  return { ok: true };
+}
 
 // ── Conditional logic (GF Conditional Logic parity) ─────────────────────
 // Accepts BOTH the legacy single-condition shape stored on imported forms
@@ -658,6 +867,8 @@ export const formDefinitionSchema = z.object({
   recaptcha_required: z.boolean(),
   // Save & Continue: allow submitters to save progress and resume via link.
   save_resume_enabled: z.boolean().default(false),
+  // Form-level submission caps + scheduling (Gravity Wiz Limit Submissions).
+  submission_limit: submissionLimitSchema.default({}),
   // Layout width of the rendered form. "full" fills the host container
   // (near-full-width when embedded on a page); "boxed" keeps a readable
   // max-width. Defaults to "full" so existing rows (no column) and new

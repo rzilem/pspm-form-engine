@@ -9,6 +9,7 @@ interface FormFieldError {
 interface RadioOption {
   label: string;
   value: string;
+  disabled?: boolean;
 }
 
 interface RadioGroupProps {
@@ -40,15 +41,22 @@ const RadioGroup = forwardRef<HTMLInputElement, RadioGroupProps>(
         <div className="flex flex-col gap-2" role="radiogroup" aria-label={label}>
           {options.map((option) => {
             const optionId = `${groupId}-${option.value.toLowerCase().replace(/\s+/g, "-")}`;
+            const soldOut = Boolean(option.disabled);
             return (
               <label
                 key={option.value}
                 htmlFor={optionId}
-                className={`flex items-center gap-3 rounded-[8px] border px-4 py-3 cursor-pointer
-                  transition-colors text-sm
-                  ${value === option.value
+                aria-disabled={soldOut || undefined}
+                className={`flex items-center gap-3 rounded-[8px] border px-4 py-3 text-sm transition-colors
+                  ${soldOut
+                    ? "cursor-not-allowed opacity-60 border-border bg-gray-50"
+                    : "cursor-pointer"
+                  }
+                  ${!soldOut && value === option.value
                     ? "border-primary bg-primary-light text-primary font-medium"
-                    : "border-border hover:border-primary/50 hover:bg-primary/[0.02]"
+                    : !soldOut
+                      ? "border-border hover:border-primary/50 hover:bg-primary/[0.02]"
+                      : "border-border"
                   }
                   ${error ? "border-error" : ""}`}
               >
@@ -59,9 +67,10 @@ const RadioGroup = forwardRef<HTMLInputElement, RadioGroupProps>(
                   name={name}
                   value={option.value}
                   checked={value === option.value}
+                  disabled={soldOut}
                   onChange={onChange}
                   onBlur={onBlur}
-                  className="w-4 h-4 text-primary accent-primary focus:ring-2 focus:ring-primary/40"
+                  className="w-4 h-4 text-primary accent-primary focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
                 />
                 <span>{option.label}</span>
               </label>

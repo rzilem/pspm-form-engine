@@ -19,6 +19,7 @@ import {
   notificationConfigSchema,
   pdfConfigSchema,
   workflowConfigSchema,
+  submissionLimitSchema,
 } from "@/lib/form-definitions";
 import { z } from "zod";
 
@@ -33,6 +34,7 @@ const updateSchema = z.object({
   confirmation_message: z.string().min(1).max(500).optional(),
   recaptcha_required: z.boolean().optional(),
   save_resume_enabled: z.boolean().optional(),
+  submission_limit: submissionLimitSchema.optional(),
   width: z.enum(["full", "boxed"]).optional(),
 });
 

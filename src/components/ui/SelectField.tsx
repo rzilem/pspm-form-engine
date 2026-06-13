@@ -9,6 +9,7 @@ interface FormFieldError {
 interface SelectOption {
   label: string;
   value: string;
+  disabled?: boolean;
 }
 
 interface SelectFieldProps
@@ -59,7 +60,11 @@ const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
             </option>
           )}
           {options.map((option) => (
-            <option key={option.value} value={option.value}>
+            <option
+              key={option.value}
+              value={option.value}
+              disabled={option.disabled}
+            >
               {option.label}
             </option>
           ))}

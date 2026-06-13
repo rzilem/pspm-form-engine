@@ -12,6 +12,7 @@ import {
   notificationConfigSchema,
   pdfConfigSchema,
   workflowConfigSchema,
+  submissionLimitSchema,
 } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
@@ -65,12 +66,16 @@ export async function loadFormDefinition(
   const pdfResult = pdfConfigSchema.safeParse(data.pdf_config ?? {});
   // workflow_config likewise defaults; pre-Phase-4 rows have no column.
   const wfResult = workflowConfigSchema.safeParse(data.workflow_config ?? {});
+  const limitResult = submissionLimitSchema.safeParse(
+    data.submission_limit ?? {},
+  );
 
   if (
     !fieldsResult.success ||
     !notifResult.success ||
     !pdfResult.success ||
-    !wfResult.success
+    !wfResult.success ||
+    !limitResult.success
   ) {
     logger.error("Form definition failed schema validation", {
       slug: normalized,
@@ -78,6 +83,7 @@ export async function loadFormDefinition(
       notifErrors: notifResult.success ? null : notifResult.error.issues,
       pdfErrors: pdfResult.success ? null : pdfResult.error.issues,
       wfErrors: wfResult.success ? null : wfResult.error.issues,
+      limitErrors: limitResult.success ? null : limitResult.error.issues,
     });
     return null;
   }
@@ -88,6 +94,7 @@ export async function loadFormDefinition(
     notification_config: notifResult.data,
     pdf_config: pdfResult.data,
     workflow_config: wfResult.data,
+    submission_limit: limitResult.data,
     // Pre-migration rows lack save_resume_enabled — default false.
     save_resume_enabled: data.save_resume_enabled ?? false,
   });

@@ -4,6 +4,17 @@ import { FormLayout } from "@/components/forms/FormLayout";
 import { EmbedAutoHeight } from "@/components/forms/EmbedAutoHeight";
 import { loadFormDefinition } from "@/lib/form-loader";
 import { loadFormPartial } from "@/lib/form-partials";
+import {
+  aggregateInventoryUsage,
+  computeInventoryRemaining,
+  evaluateSubmissionLimit,
+  formHasInventory,
+} from "@/lib/form-definitions";
+import {
+  countFormSubmissions,
+  fetchSubmissionDataRows,
+} from "@/lib/form-submission-stats";
+import { FormClosedMessage } from "@/components/forms/FormClosedMessage";
 import { DynamicForm } from "./DynamicForm";
 
 // Forms can change at any time via the admin UI; never cache this route.
@@ -36,6 +47,25 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
     notFound();
   }
 
+  const entryCount = await countFormSubmissions(definition.id);
+  const limitStatus = evaluateSubmissionLimit(
+    definition.submission_limit,
+    entryCount,
+    new Date(),
+  );
+
+  let inventoryRemaining:
+    | Record<string, Record<string, number>>
+    | undefined;
+  if (formHasInventory(definition.field_schema)) {
+    const rows = await fetchSubmissionDataRows(definition.id);
+    const usage = aggregateInventoryUsage(definition.field_schema, rows);
+    inventoryRemaining = computeInventoryRemaining(
+      definition.field_schema,
+      usage,
+    );
+  }
+
   let initialValues: Record<string, unknown> | undefined;
   let initialPage: number | undefined;
   let resumeToken: string | undefined;
@@ -55,6 +85,14 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
         "We couldn't restore your saved progress — it may have expired. You can start fresh below.";
     }
   }
+
+  const closedBlock = (
+    <FormClosedMessage
+      title={definition.title}
+      description={definition.description}
+      message={limitStatus.message}
+    />
+  );
 
   // Embed mode (?embed=1): drop the PSPM header/footer chrome so the form
   // sits cleanly inside an iframe on psprop.net, and report height to the
@@ -76,13 +114,18 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
               <p className="mt-1 text-sm text-muted">{definition.description}</p>
             )}
           </div>
-          <DynamicForm
-            definition={definition}
-            initialValues={initialValues}
-            initialPage={initialPage}
-            resumeToken={resumeToken}
-            resumeNotice={resumeNotice}
-          />
+          {!limitStatus.open ? (
+            closedBlock
+          ) : (
+            <DynamicForm
+              definition={definition}
+              initialValues={initialValues}
+              initialPage={initialPage}
+              resumeToken={resumeToken}
+              resumeNotice={resumeNotice}
+              inventoryRemaining={inventoryRemaining}
+            />
+          )}
         </div>
         <EmbedAutoHeight slug={slug} />
       </main>
@@ -95,13 +138,18 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
       subtitle={definition.description ?? undefined}
       contentWidth={definition.width}
     >
-      <DynamicForm
-        definition={definition}
-        initialValues={initialValues}
-        initialPage={initialPage}
-        resumeToken={resumeToken}
-        resumeNotice={resumeNotice}
-      />
+      {!limitStatus.open ? (
+        closedBlock
+      ) : (
+        <DynamicForm
+          definition={definition}
+          initialValues={initialValues}
+          initialPage={initialPage}
+          resumeToken={resumeToken}
+          resumeNotice={resumeNotice}
+          inventoryRemaining={inventoryRemaining}
+        />
+      )}
     </FormLayout>
   );
 }
