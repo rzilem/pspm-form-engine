@@ -545,15 +545,20 @@ export type NotificationConfig = z.infer<typeof notificationConfigSchema>;
 
 // ── PDF config (Phase 2: per-submission PDF generation) ────────────────
 // When enabled, /api/submit renders a PDF after save and attaches it to
-// the admin notification email. Templates: 'default' = branded letterhead
-// with field/value table. Future templates can ship as additional values.
+// the admin notification email. Templates mirror Gravity PDF layouts.
 export const pdfConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  template: z.enum(["default"]).default("default"),
+  template: z.enum(["default", "invoice", "letter"]).default("default"),
   // Filename prefix for the PDF; submission id is appended. Defaults to
   // the form slug. e.g. prefix='HOA-Payment-Plan' yields filenames like
   // 'HOA-Payment-Plan-<id>.pdf'.
   filenamePrefix: z.string().max(80).optional(),
+  // Append uploaded PDFs (and optionally images) after the generated pages.
+  mergeUploads: z.boolean().default(false),
+  mergeImages: z.boolean().default(false),
+  // Letter template: render this textarea field as the body. When omitted,
+  // all visible value fields render as paragraphs.
+  letterBodyFieldId: z.string().max(64).optional(),
 });
 export type PdfConfig = z.infer<typeof pdfConfigSchema>;
 
@@ -642,7 +647,12 @@ export const formDefinitionSchema = z.object({
   status: z.enum(["draft", "published", "archived"]),
   field_schema: z.array(fieldDefinitionSchema),
   notification_config: notificationConfigSchema,
-  pdf_config: pdfConfigSchema.default({ enabled: false, template: "default" }),
+  pdf_config: pdfConfigSchema.default({
+    enabled: false,
+    template: "default",
+    mergeUploads: false,
+    mergeImages: false,
+  }),
   workflow_config: workflowConfigSchema.default({ enabled: false, steps: [] }),
   confirmation_message: z.string().min(1).max(500),
   recaptcha_required: z.boolean(),

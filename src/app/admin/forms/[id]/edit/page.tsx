@@ -52,7 +52,14 @@ interface FormDefinitionRow {
   status: "draft" | "published" | "archived";
   field_schema: unknown;
   notification_config: unknown;
-  pdf_config: { enabled?: boolean; template?: string; filenamePrefix?: string } | null;
+  pdf_config: {
+    enabled?: boolean;
+    template?: "default" | "invoice" | "letter";
+    filenamePrefix?: string;
+    mergeUploads?: boolean;
+    mergeImages?: boolean;
+    letterBodyFieldId?: string;
+  } | null;
   workflow_config: unknown;
   confirmation_message: string;
   recaptcha_required: boolean;
@@ -98,7 +105,11 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [notificationConfigJson, setNotificationConfigJson] = useState('{"rules":[]}');
   const [pdfEnabled, setPdfEnabled] = useState(false);
+  const [pdfTemplate, setPdfTemplate] = useState<"default" | "invoice" | "letter">("default");
   const [pdfFilenamePrefix, setPdfFilenamePrefix] = useState("");
+  const [pdfMergeUploads, setPdfMergeUploads] = useState(false);
+  const [pdfMergeImages, setPdfMergeImages] = useState(false);
+  const [pdfLetterBodyFieldId, setPdfLetterBodyFieldId] = useState("");
   const [workflowEnabled, setWorkflowEnabled] = useState(false);
   const [workflowStepsJson, setWorkflowStepsJson] = useState("[]");
   // Preview-only viewport toggle (does NOT persist — `width` above is the
@@ -146,7 +157,14 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
         JSON.stringify(data.notification_config ?? { rules: [] }, null, 2),
       );
       setPdfEnabled(Boolean(data.pdf_config?.enabled));
+      const tpl = data.pdf_config?.template;
+      setPdfTemplate(
+        tpl === "invoice" || tpl === "letter" ? tpl : "default",
+      );
       setPdfFilenamePrefix(data.pdf_config?.filenamePrefix ?? "");
+      setPdfMergeUploads(Boolean(data.pdf_config?.mergeUploads));
+      setPdfMergeImages(Boolean(data.pdf_config?.mergeImages));
+      setPdfLetterBodyFieldId(data.pdf_config?.letterBodyFieldId ?? "");
       const wf = (data.workflow_config ?? {}) as {
         enabled?: boolean;
         steps?: unknown;
@@ -275,9 +293,14 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
           notification_config: notificationConfig,
           pdf_config: {
             enabled: pdfEnabled,
-            template: "default",
+            template: pdfTemplate,
+            mergeUploads: pdfMergeUploads,
+            mergeImages: pdfMergeImages,
             ...(pdfFilenamePrefix.trim()
               ? { filenamePrefix: pdfFilenamePrefix.trim() }
+              : {}),
+            ...(pdfTemplate === "letter" && pdfLetterBodyFieldId.trim()
+              ? { letterBodyFieldId: pdfLetterBodyFieldId.trim() }
               : {}),
           },
           workflow_config: {
@@ -327,7 +350,12 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
       status: "published",
       field_schema: fields,
       notification_config: { rules: [] },
-      pdf_config: { enabled: false, template: "default" },
+      pdf_config: {
+        enabled: false,
+        template: "default",
+        mergeUploads: false,
+        mergeImages: false,
+      },
       workflow_config: { enabled: false, steps: [] },
       confirmation_message: confirmationMessage || "Submitted.",
       recaptcha_required: false,
@@ -547,13 +575,97 @@ export default function EditFormPage({ params }: { params: Promise<{ id: string 
                     </div>
                   </label>
                   {pdfEnabled && (
-                    <TextInput
-                      label="Filename prefix (optional)"
-                      value={pdfFilenamePrefix}
-                      onChange={(e) => setPdfFilenamePrefix(e.target.value)}
-                      placeholder={`${definition.slug}`}
-                      helperText="Submission id is appended automatically. Defaults to the form slug."
-                    />
+                    <div className="space-y-4">
+                      <SelectField
+                        label="PDF template"
+                        value={pdfTemplate}
+                        onChange={(e) =>
+                          setPdfTemplate(
+                            e.target.value as "default" | "invoice" | "letter",
+                          )
+                        }
+                        options={[
+                          {
+                            value: "default",
+                            label: "Default — field/value table by section",
+                          },
+                          {
+                            value: "invoice",
+                            label: "Invoice — itemized line items + total",
+                          },
+                          {
+                            value: "letter",
+                            label: "Letter — letterhead + body paragraphs",
+                          },
+                        ]}
+                      />
+                      {pdfTemplate === "letter" && (
+                        <SelectField
+                          label="Letter body field (optional)"
+                          value={pdfLetterBodyFieldId}
+                          onChange={(e) => setPdfLetterBodyFieldId(e.target.value)}
+                          options={[
+                            {
+                              value: "",
+                              label: "All fields as paragraphs",
+                            },
+                            ...fields
+                              .filter(
+                                (f) =>
+                                  f.type === "textarea" || f.type === "text",
+                              )
+                              .map((f) => ({
+                                value: f.id,
+                                label: f.label || f.id,
+                              })),
+                          ]}
+                          helperText="Pick one long-text field for the letter body, or leave as all fields."
+                        />
+                      )}
+                      <TextInput
+                        label="Filename prefix (optional)"
+                        value={pdfFilenamePrefix}
+                        onChange={(e) => setPdfFilenamePrefix(e.target.value)}
+                        placeholder={`${definition.slug}`}
+                        helperText="Submission id is appended automatically. Defaults to the form slug."
+                      />
+                      <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={pdfMergeUploads}
+                          onChange={(e) => setPdfMergeUploads(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            Merge uploaded PDFs into the attachment
+                          </p>
+                          <p className="text-xs text-muted mt-1">
+                            Appends receipt PDFs after the generated pages so staff
+                            receive one combined document (Gravity PDF merge_pdfs).
+                          </p>
+                        </div>
+                      </label>
+                      {pdfMergeUploads && (
+                        <label className="flex items-start gap-3 rounded-[8px] border border-border px-4 py-3 cursor-pointer ml-6">
+                          <input
+                            type="checkbox"
+                            checked={pdfMergeImages}
+                            onChange={(e) => setPdfMergeImages(e.target.checked)}
+                            className="mt-0.5 w-4 h-4 rounded text-primary accent-primary focus:ring-2 focus:ring-primary/40 shrink-0"
+                          />
+                          <div>
+                            <p className="text-sm font-medium text-foreground">
+                              Also embed uploaded images (PNG/JPEG) as pages
+                            </p>
+                            <p className="text-xs text-muted mt-1">
+                              Word/Excel uploads stay separate; only PDFs and images
+                              merge.
+                            </p>
+                          </div>
+                        </label>
+                      )}
+                    </div>
                   )}
                 </section>
 

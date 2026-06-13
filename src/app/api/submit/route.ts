@@ -14,6 +14,7 @@ import { verifyRecaptcha } from "@/lib/recaptcha";
 import { loadFormDefinition } from "@/lib/form-loader";
 import { buildSubmissionSchema, type FormDefinition } from "@/lib/form-definitions";
 import { generateFormPdf, getPdfFilename } from "@/lib/form-pdf";
+import { mergeFormPdfWithUploads } from "@/lib/form-pdf-merge";
 import { kickoffWorkflow, workflowActionUrl } from "@/lib/workflow";
 import type { z } from "zod";
 
@@ -157,12 +158,17 @@ export async function POST(request: Request) {
     // throttling kills any work scheduled after the response returns.
     let pdfAttachment: { filename: string; content: Buffer } | null = null;
     if (formDefinition) {
-      const pdfBuffer = await generateFormPdf(
+      let pdfBuffer = await generateFormPdf(
         formDefinition,
         formResult.data as Record<string, unknown>,
         submission.id,
       );
       if (pdfBuffer) {
+        pdfBuffer = await mergeFormPdfWithUploads(
+          pdfBuffer,
+          formDefinition,
+          formResult.data as Record<string, unknown>,
+        );
         pdfAttachment = {
           filename: getPdfFilename(formDefinition, submission.id),
           content: pdfBuffer,

@@ -9,9 +9,8 @@
  * proven in pspm-onboarding-portal). React-style template components
  * stay readable while supporting flexible layouts later.
  *
- * Trade-offs:
- *  - One template ('default') ships in v1. Custom per-form templates are
- *    Phase 2.1; the schema (`pdf_config.template`) leaves room.
+ * Templates: `default` (field table), `invoice` (line_items + total focus),
+ * `letter` (letterhead + body paragraphs). Upload merge lives in form-pdf-merge.ts.
  *  - File uploads / signatures / payment fields aren't surfaced in the
  *    PDF until Phase 1.3 lands them as form-engine data — they currently
  *    can't be captured in dynamic forms anyway.
@@ -220,7 +219,136 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: COLORS.navy,
   },
+  letterDate: {
+    fontSize: 10,
+    color: COLORS.muted,
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  letterRe: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: COLORS.navy,
+    marginBottom: 16,
+  },
+  letterBody: {
+    fontSize: 11,
+    lineHeight: 1.55,
+  },
+  letterParagraph: {
+    marginBottom: 12,
+  },
+  invoiceSectionLabel: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: COLORS.navy,
+    marginTop: 8,
+    marginBottom: 8,
+  },
 });
+
+type FieldGroup = { heading: string | null; fields: FieldDefinition[] };
+
+function getBrandEnv() {
+  return {
+    phone: process.env.NEXT_PUBLIC_PSPM_PHONE ?? "512-251-6122",
+    website: process.env.NEXT_PUBLIC_PSPM_WEBSITE ?? "psprop.net",
+    address:
+      process.env.NEXT_PUBLIC_PSPM_ADDRESS ??
+      "1490 Rusk Rd, Ste. 301, Round Rock, TX 78665",
+  };
+}
+
+function BrandHeader() {
+  const { phone, website } = getBrandEnv();
+  return (
+    <View style={styles.header}>
+      <Text style={styles.brand}>PS Property Management</Text>
+      <Text style={styles.brandSub}>
+        {phone} · {website}
+      </Text>
+    </View>
+  );
+}
+
+function PdfFooter({
+  definition,
+  submissionId,
+}: {
+  definition: FormDefinition;
+  submissionId: string;
+}) {
+  const { address } = getBrandEnv();
+  return (
+    <View style={styles.footer} fixed>
+      <Text>PS Property Management · {address}</Text>
+      <Text>
+        This document was generated automatically from the {definition.title}{" "}
+        submission. Reference {submissionId}.
+      </Text>
+    </View>
+  );
+}
+
+/** Visible fields grouped by section_break, excluding empty sections. */
+function buildVisibleGroups(
+  definition: FormDefinition,
+  data: Record<string, unknown>,
+): FieldGroup[] {
+  const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
+  const groups: FieldGroup[] = [];
+  let current: FieldGroup = { heading: null, fields: [] };
+  for (const f of definition.field_schema) {
+    if (f.type === "page_break") continue;
+    if (!visibleIds.has(f.id)) continue;
+    if (f.type === "section_break") {
+      if (current.fields.length > 0) groups.push(current);
+      current = { heading: f.label, fields: [] };
+    } else {
+      current.fields.push(f);
+    }
+  }
+  if (current.fields.length > 0) groups.push(current);
+  return groups.filter((g) =>
+    g.fields.some((f) => wouldRenderFieldInPdf(f, data[f.id])),
+  );
+}
+
+function renderFieldRows(
+  fields: FieldDefinition[],
+  data: Record<string, unknown>,
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  fields.forEach((f, fi) => {
+    if (f.type === "line_items") {
+      const block = renderLineItemsTable(f, data[f.id]);
+      if (block) nodes.push(block);
+      return;
+    }
+    if (f.type === "list") {
+      const block = renderListTable(f, data[f.id]);
+      if (block) nodes.push(block);
+      return;
+    }
+    if (f.type === "total") {
+      const block = renderTotalRow(f, data[f.id]);
+      if (block) nodes.push(block);
+      return;
+    }
+    const cell = renderValueCell(f, data[f.id]);
+    if (cell === null) return;
+    nodes.push(
+      <View
+        key={f.id}
+        style={[styles.row, fi % 2 === 1 ? styles.rowZebra : {}]}
+      >
+        <Text style={styles.labelCell}>{f.label}</Text>
+        <View style={styles.valueCell}>{cell}</View>
+      </View>,
+    );
+  });
+  return nodes;
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -443,50 +571,12 @@ function DefaultFormDocument({
   submissionId: string;
   submittedAt: Date;
 }) {
-  const phone = process.env.NEXT_PUBLIC_PSPM_PHONE ?? "512-251-6122";
-  const website = process.env.NEXT_PUBLIC_PSPM_WEBSITE ?? "psprop.net";
-  const address =
-    process.env.NEXT_PUBLIC_PSPM_ADDRESS ??
-    "1490 Rusk Rd, Ste. 301, Round Rock, TX 78665";
-
-  // Group fields by section_break boundaries so PDFs of long forms with
-  // visual sections in the UI render with the same hierarchy on paper.
-  // Only include sections/fields the submitter actually saw (same visibility
-  // fixpoint as the form) and drop section headings with no value-bearing rows.
-  const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
-
-  type Group = { heading: string | null; fields: FieldDefinition[] };
-  const groups: Group[] = [];
-  let current: Group = { heading: null, fields: [] };
-  for (const f of definition.field_schema) {
-    if (f.type === "page_break") {
-      continue;
-    }
-    if (!visibleIds.has(f.id)) {
-      continue;
-    }
-    if (f.type === "section_break") {
-      if (current.fields.length > 0) groups.push(current);
-      current = { heading: f.label, fields: [] };
-    } else {
-      current.fields.push(f);
-    }
-  }
-  if (current.fields.length > 0) groups.push(current);
-
-  const groupsToRender = groups.filter((g) =>
-    g.fields.some((f) => wouldRenderFieldInPdf(f, data[f.id])),
-  );
+  const groupsToRender = buildVisibleGroups(definition, data);
 
   return (
     <Document>
       <Page size="LETTER" style={styles.page}>
-        <View style={styles.header}>
-          <Text style={styles.brand}>PS Property Management</Text>
-          <Text style={styles.brandSub}>
-            {phone} · {website}
-          </Text>
-        </View>
+        <BrandHeader />
 
         <Text style={styles.title}>{definition.title}</Text>
         <Text style={styles.meta}>
@@ -501,43 +591,193 @@ function DefaultFormDocument({
         {groupsToRender.map((g, gi) => (
           <View key={gi} wrap={false}>
             {g.heading ? <Text style={styles.sectionHeading}>{g.heading}</Text> : null}
-            <View style={styles.table}>
-              {g.fields.map((f, fi) => {
-                // Commerce fields render full-width as an invoice table / total
-                // row rather than a label|value cell.
-                if (f.type === "line_items") {
-                  return renderLineItemsTable(f, data[f.id]);
-                }
-                if (f.type === "list") {
-                  return renderListTable(f, data[f.id]);
-                }
-                if (f.type === "total") {
-                  return renderTotalRow(f, data[f.id]);
-                }
-                const cell = renderValueCell(f, data[f.id]);
-                if (cell === null) return null;
-                return (
-                  <View
-                    key={f.id}
-                    style={[styles.row, fi % 2 === 1 ? styles.rowZebra : {}]}
-                  >
-                    <Text style={styles.labelCell}>{f.label}</Text>
-                    <View style={styles.valueCell}>{cell}</View>
-                  </View>
-                );
-              })}
-            </View>
+            <View style={styles.table}>{renderFieldRows(g.fields, data)}</View>
           </View>
         ))}
 
-        <View style={styles.footer} fixed>
-          <Text>
-            PS Property Management · {address}
-          </Text>
-          <Text>
-            This document was generated automatically from the {definition.title} submission. Reference {submissionId}.
-          </Text>
-        </View>
+        <PdfFooter definition={definition} submissionId={submissionId} />
+      </Page>
+    </Document>
+  );
+}
+
+/** Invoice-style layout: itemized line_items + total up front, other fields below. */
+function InvoiceFormDocument({
+  definition,
+  data,
+  submissionId,
+  submittedAt,
+}: {
+  definition: FormDefinition;
+  data: Record<string, unknown>;
+  submissionId: string;
+  submittedAt: Date;
+}) {
+  const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
+  const commerceFields = definition.field_schema.filter(
+    (f) =>
+      visibleIds.has(f.id) &&
+      (f.type === "line_items" || f.type === "total") &&
+      wouldRenderFieldInPdf(f, data[f.id]),
+  );
+  const otherFields = definition.field_schema.filter(
+    (f) =>
+      visibleIds.has(f.id) &&
+      f.type !== "page_break" &&
+      f.type !== "section_break" &&
+      f.type !== "html" &&
+      f.type !== "line_items" &&
+      f.type !== "total" &&
+      wouldRenderFieldInPdf(f, data[f.id]),
+  );
+
+  return (
+    <Document>
+      <Page size="LETTER" style={styles.page}>
+        <BrandHeader />
+
+        <Text style={styles.title}>{definition.title}</Text>
+        <Text style={styles.meta}>
+          Submitted {submittedAt.toLocaleString("en-US", { timeZone: "America/Chicago" })} ·
+          Reference: {submissionId.slice(0, 8)}
+        </Text>
+
+        {commerceFields.length > 0 ? (
+          <View>
+            {commerceFields.map((f) => {
+              if (f.type === "line_items") {
+                return renderLineItemsTable(f, data[f.id]);
+              }
+              if (f.type === "total") {
+                return renderTotalRow(f, data[f.id]);
+              }
+              return null;
+            })}
+          </View>
+        ) : null}
+
+        {otherFields.length > 0 ? (
+          <View>
+            <Text style={styles.invoiceSectionLabel}>Additional information</Text>
+            <View style={styles.table}>{renderFieldRows(otherFields, data)}</View>
+          </View>
+        ) : null}
+
+        <PdfFooter definition={definition} submissionId={submissionId} />
+      </Page>
+    </Document>
+  );
+}
+
+/** Letterhead + body paragraphs (one textarea or all fields). */
+function LetterFormDocument({
+  definition,
+  data,
+  submissionId,
+  submittedAt,
+}: {
+  definition: FormDefinition;
+  data: Record<string, unknown>;
+  submissionId: string;
+  submittedAt: Date;
+}) {
+  const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
+  const bodyFieldId = definition.pdf_config?.letterBodyFieldId;
+  const bodyField = bodyFieldId
+    ? definition.field_schema.find((f) => f.id === bodyFieldId)
+    : undefined;
+
+  const dateStr = submittedAt.toLocaleDateString("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  let bodyParagraphs: React.ReactNode[] = [];
+
+  if (
+    bodyField &&
+    visibleIds.has(bodyField.id) &&
+    (bodyField.type === "textarea" || bodyField.type === "text")
+  ) {
+    const text = formatFieldDisplayText(bodyField, data[bodyField.id]);
+    if (text) {
+      bodyParagraphs = text.split(/\n\n+/).map((para, i) => (
+        <Text key={i} style={[styles.letterBody, styles.letterParagraph]}>
+          {para}
+        </Text>
+      ));
+    }
+  } else {
+    for (const f of definition.field_schema) {
+      if (!visibleIds.has(f.id)) continue;
+      if (
+        f.type === "section_break" ||
+        f.type === "page_break" ||
+        f.type === "html"
+      ) {
+        continue;
+      }
+      if (!wouldRenderFieldInPdf(f, data[f.id])) continue;
+      if (f.type === "line_items") {
+        bodyParagraphs.push(
+          <View key={f.id} style={styles.letterParagraph}>
+            {renderLineItemsTable(f, data[f.id])}
+          </View>,
+        );
+        continue;
+      }
+      if (f.type === "list") {
+        bodyParagraphs.push(
+          <View key={f.id} style={styles.letterParagraph}>
+            {renderListTable(f, data[f.id])}
+          </View>,
+        );
+        continue;
+      }
+      if (f.type === "total") {
+        bodyParagraphs.push(
+          <View key={f.id} style={styles.letterParagraph}>
+            {renderTotalRow(f, data[f.id])}
+          </View>,
+        );
+        continue;
+      }
+      if (f.type === "signature") {
+        const cell = renderValueCell(f, data[f.id]);
+        if (cell) {
+          bodyParagraphs.push(
+            <View key={f.id} style={styles.letterParagraph}>
+              <Text style={styles.letterBody}>{f.label}</Text>
+              {cell}
+            </View>,
+          );
+        }
+        continue;
+      }
+      const text = formatFieldDisplayText(f, data[f.id]);
+      if (!text) continue;
+      bodyParagraphs.push(
+        <Text key={f.id} style={[styles.letterBody, styles.letterParagraph]}>
+          <Text style={{ fontWeight: "bold" }}>{f.label}: </Text>
+          {text}
+        </Text>,
+      );
+    }
+  }
+
+  return (
+    <Document>
+      <Page size="LETTER" style={styles.page}>
+        <BrandHeader />
+
+        <Text style={styles.letterDate}>{dateStr}</Text>
+        <Text style={styles.letterRe}>Re: {definition.title}</Text>
+
+        <View>{bodyParagraphs}</View>
+
+        <PdfFooter definition={definition} submissionId={submissionId} />
       </Page>
     </Document>
   );
@@ -561,14 +801,21 @@ export async function generateFormPdf(
   if (!definition.pdf_config?.enabled) return null;
 
   try {
-    const doc = (
-      <DefaultFormDocument
-        definition={definition}
-        data={data}
-        submissionId={submissionId}
-        submittedAt={submittedAt}
-      />
-    );
+    const template = definition.pdf_config.template ?? "default";
+    const shared = {
+      definition,
+      data,
+      submissionId,
+      submittedAt,
+    };
+    const doc =
+      template === "invoice" ? (
+        <InvoiceFormDocument {...shared} />
+      ) : template === "letter" ? (
+        <LetterFormDocument {...shared} />
+      ) : (
+        <DefaultFormDocument {...shared} />
+      );
     const stream = await pdf(doc).toBuffer();
     return await streamToBuffer(stream as unknown as NodeJS.ReadableStream);
   } catch (err) {
