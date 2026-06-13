@@ -1,8 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { z } from "zod";
 import { Button } from "@/components/ui/Button";
 import type { FormDefinition } from "@/lib/form-definitions";
+import {
+  RECAPTCHA_SITE_KEY,
+  getRecaptchaToken,
+} from "@/lib/recaptcha-client";
 
 const SAVE_URL = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api/save-progress`
@@ -48,10 +53,22 @@ export function SaveAndContinueButton({
       const data = getValues();
       const emailField = definition.field_schema.find((f) => f.type === "email");
       const emailRaw = emailField ? data[emailField.id] : undefined;
-      const emailTo =
-        typeof emailRaw === "string" && emailRaw.includes("@")
-          ? emailRaw.trim()
+      const emailTo = (() => {
+        if (typeof emailRaw !== "string") return undefined;
+        const trimmed = emailRaw.trim();
+        if (!trimmed) return undefined;
+        return z.string().email().safeParse(trimmed).success
+          ? trimmed
           : undefined;
+      })();
+
+      const recaptchaActive =
+        Boolean(RECAPTCHA_SITE_KEY) &&
+        definition.recaptcha_required &&
+        !preview;
+      const recaptchaToken = recaptchaActive
+        ? await getRecaptchaToken("save_progress")
+        : undefined;
 
       const response = await fetch(SAVE_URL, {
         method: "POST",
@@ -62,6 +79,7 @@ export function SaveAndContinueButton({
           currentPage,
           token: resumeToken,
           hp: getHoneypotValue(),
+          recaptchaToken,
           ...(emailTo ? { emailTo } : {}),
         }),
       });
@@ -94,6 +112,7 @@ export function SaveAndContinueButton({
   }, [
     preview,
     definition.save_resume_enabled,
+    definition.recaptcha_required,
     definition.field_schema,
     getValues,
     formSlug,

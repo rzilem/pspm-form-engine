@@ -2,6 +2,7 @@ import { z } from "zod";
 import { logger } from "@/lib/logger";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { loadFormDefinition } from "@/lib/form-loader";
+import { verifyRecaptcha } from "@/lib/recaptcha";
 import {
   buildResumeUrl,
   findSubmitterEmail,
@@ -21,9 +22,18 @@ const saveProgressSchema = z.object({
   currentPage: z.number().int().min(0).max(500).optional(),
   token: z.string().min(1).max(128).optional(),
   hp: z.string().optional(),
+  recaptchaToken: z.string().optional(),
   /** Optional: email the resume link to this address (best-effort). */
-  emailTo: z.string().email().max(320).optional(),
+  emailTo: z.string().max(320).optional(),
 });
+
+/** Accept any string; only use it as a recipient when it is a valid email. */
+function normalizeEmailRecipient(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  const parsed = z.string().email().safeParse(trimmed);
+  return parsed.success ? trimmed : undefined;
+}
 
 export async function POST(request: Request) {
   try {
@@ -44,7 +54,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { slug, data, currentPage, token, hp, emailTo } = parsed.data;
+    const { slug, data, currentPage, token, hp, emailTo, recaptchaToken } =
+      parsed.data;
 
     if (hp && hp.trim() !== "") {
       logger.warn("Honeypot triggered on save-progress", { slug });
@@ -61,6 +72,17 @@ export async function POST(request: Request) {
         { error: "Save and continue is not enabled for this form" },
         { status: 403 },
       );
+    }
+
+    if (definition.recaptcha_required) {
+      const captchaValid = await verifyRecaptcha(recaptchaToken);
+      if (!captchaValid) {
+        logger.warn("reCAPTCHA failed on save-progress", { slug });
+        return Response.json(
+          { error: "Bot detection failed. Please try again." },
+          { status: 403 },
+        );
+      }
     }
 
     const sanitized = sanitizePartialData(data, definition.field_schema);
@@ -141,7 +163,7 @@ export async function POST(request: Request) {
     const resumeUrl = buildResumeUrl(definition.slug, resumeToken, request);
 
     const recipient =
-      emailTo?.trim() ||
+      normalizeEmailRecipient(emailTo) ||
       findSubmitterEmail(definition, sanitized);
     if (recipient) {
       try {
