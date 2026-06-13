@@ -12,6 +12,8 @@ import {
   formatMoney,
   formatFieldDisplayText,
   getSelectedImageChoiceOptions,
+  resolveListColumns,
+  listRowIsMeaningful,
   resolveVisibleFieldIds,
   type FormDefinition,
   type FieldDefinition,
@@ -289,6 +291,32 @@ function renderFieldCellHtml(field: FieldDefinition, raw: unknown): string {
       })
       .join("");
     return `<ul style="margin:0;padding-left:18px">${items}</ul>`;
+  }
+  if (field.type === "list") {
+    if (!Array.isArray(raw) || raw.length === 0) return "";
+    const cols = resolveListColumns(field);
+    const colIds = new Set(cols.map((c) => c.id));
+    const rows = raw.filter((r) => listRowIsMeaningful(r, colIds));
+    if (rows.length === 0) return "";
+    const head = cols
+      .map(
+        (c) =>
+          `<th style="padding:6px 10px;border:1px solid #e5e7eb;background:#1e3a5f;color:#fff;text-align:left;font-size:12px">${escapeHtml(c.label)}</th>`,
+      )
+      .join("");
+    const body = rows
+      .map((r) => {
+        const row = (r ?? {}) as Record<string, unknown>;
+        const cells = cols
+          .map(
+            (c) =>
+              `<td style="padding:6px 10px;border:1px solid #e5e7eb;vertical-align:top">${escapeHtml(String(row[c.id] ?? "").trim())}</td>`,
+          )
+          .join("");
+        return `<tr>${cells}</tr>`;
+      })
+      .join("");
+    return `<table style="border-collapse:collapse;margin:8px 0;min-width:240px"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
   }
   if (field.type === "total") {
     // A conditionally hidden total is deleted from the data — skip the row

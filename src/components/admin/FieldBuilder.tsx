@@ -45,6 +45,7 @@ const TYPE_LABELS: Record<FieldType, string> = {
   page_break: "Page break (wizard)",
   html: "HTML block",
   line_items: "Line items (priced)",
+  list: "List (repeating rows)",
   total: "Total (auto-calculated)",
 };
 
@@ -160,6 +161,13 @@ export function FieldBuilder({ value, onChange }: FieldBuilderProps) {
           presetItems: undefined,
           allowQuantity: undefined,
         };
+      }
+      if (
+        patch.type !== undefined &&
+        patch.type !== "list" &&
+        prev?.type === "list"
+      ) {
+        next[index] = { ...next[index], listColumns: undefined };
       }
       const updated = next[index];
       // Only scalar fields can be triggers (the resolver compares String(value)).
@@ -293,6 +301,7 @@ function FieldCard({
   const isHtml = field.type === "html";
   const isTotal = field.type === "total";
   const isLineItems = field.type === "line_items";
+  const isList = field.type === "list";
   // Display-only blocks (heading, page break, HTML, auto-calculated total)
   // carry no input value, so they hide the Required toggle and validation.
   const isDisplayOnly = isSectionBreak || isPageBreak || isHtml || isTotal;
@@ -397,6 +406,15 @@ function FieldCard({
             and event handlers are removed automatically.
           </p>
         </div>
+      )}
+
+      {isList && (
+        <ListColumnsEditor
+          columns={field.listColumns ?? [{ id: "item", label: "Item" }]}
+          onChange={(listColumns) =>
+            onPatch({ listColumns: listColumns.length ? listColumns : undefined })
+          }
+        />
       )}
 
       {isLineItems && (
@@ -728,6 +746,109 @@ function OptionsEditor({
       <Button type="button" variant="outline" size="sm" onClick={addOption}>
         + Add option
       </Button>
+    </div>
+  );
+}
+
+type ListColumnDef = NonNullable<FieldDefinition["listColumns"]>[number];
+
+function makeColumnId(label: string, taken: ReadonlySet<string>): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 56);
+  const base = slug || "col";
+  if (!taken.has(base) && base.length <= 64) return base;
+  for (let n = 2; n < 100000; n += 1) {
+    const candidate = `${base}_${n}`.slice(0, 64);
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `col_${Date.now()}`.slice(0, 64);
+}
+
+function ListColumnsEditor({
+  columns,
+  onChange,
+}: {
+  columns: ListColumnDef[];
+  onChange: (next: ListColumnDef[]) => void;
+}) {
+  const update = (i: number, patch: Partial<ListColumnDef>) =>
+    onChange(columns.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  const remove = (i: number) => {
+    if (columns.length <= 1) return;
+    onChange(columns.filter((_, idx) => idx !== i));
+  };
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= columns.length) return;
+    const next = [...columns];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const add = () => {
+    const taken = new Set(columns.map((c) => c.id));
+    const label = `Column ${columns.length + 1}`;
+    onChange([
+      ...columns,
+      { id: makeColumnId(label, taken), label },
+    ]);
+  };
+  return (
+    <div className="space-y-3 rounded-[8px] border border-border px-3 py-3">
+      <p className="text-sm font-medium text-foreground">List columns</p>
+      <p className="text-xs text-muted">
+        Submitters add rows; each row has one text cell per column (max 12).
+      </p>
+      {columns.map((col, i) => (
+        <div key={col.id} className="flex items-end gap-2">
+          <TextInput
+            label={`Column ${i + 1} label`}
+            value={col.label}
+            onChange={(e) => update(i, { label: e.target.value })}
+            className="flex-1"
+          />
+          <div className="flex gap-1 mb-0.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={i === 0}
+              onClick={() => move(i, -1)}
+              aria-label="Move column up"
+            >
+              ↑
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={i === columns.length - 1}
+              onClick={() => move(i, 1)}
+              aria-label="Move column down"
+            >
+              ↓
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={columns.length <= 1}
+              onClick={() => remove(i)}
+              aria-label="Remove column"
+              className="!border-error !text-error hover:!bg-error-light"
+            >
+              ✕
+            </Button>
+          </div>
+        </div>
+      ))}
+      {columns.length < 12 && (
+        <Button type="button" variant="outline" size="sm" onClick={add}>
+          + Add column
+        </Button>
+      )}
     </div>
   );
 }

@@ -38,6 +38,8 @@ import {
   resolveVisibleFieldIds,
   formatFieldDisplayText,
   getSelectedImageChoiceOptions,
+  resolveListColumns,
+  listRowIsMeaningful,
 } from "@/lib/form-definitions";
 import { logger } from "@/lib/logger";
 
@@ -242,6 +244,11 @@ function wouldRenderFieldInPdf(
   if (field.type === "line_items") {
     return Array.isArray(value) && value.length > 0;
   }
+  if (field.type === "list") {
+    if (!Array.isArray(value) || value.length === 0) return false;
+    const colIds = new Set(resolveListColumns(field).map((c) => c.id));
+    return value.some((r) => listRowIsMeaningful(r, colIds));
+  }
   if (field.type === "total") {
     return value !== undefined && value !== null;
   }
@@ -284,7 +291,8 @@ function renderValueCell(
   // line_items + total are rendered full-width as an itemized invoice table by
   // the document body (renderLineItemsTable / renderTotalRow), not as a
   // label/value cell — so they fall through here and are skipped.
-  if (field.type === "line_items" || field.type === "total") return null;
+  if (field.type === "line_items" || field.type === "list" || field.type === "total")
+    return null;
   if (field.type === "image_choice") {
     const selections = getSelectedImageChoiceOptions(field, value);
     if (selections.length === 0) return null;
@@ -348,6 +356,54 @@ function renderLineItemsTable(
               <Text style={styles.liNumCol}>{formatMoney(amt)}</Text>
             ) : null}
             <Text style={styles.liNumCol}>{formatMoney(lt)}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// Full-width table for a list field. Returns null when empty.
+function renderListTable(
+  field: FieldDefinition,
+  value: unknown,
+): React.ReactNode | null {
+  const cols = resolveListColumns(field);
+  const colIds = new Set(cols.map((c) => c.id));
+  const rows = (Array.isArray(value) ? value : []).filter((r) =>
+    listRowIsMeaningful(r, colIds),
+  );
+  if (rows.length === 0) return null;
+  const colWidth = `${Math.floor(100 / cols.length)}%`;
+  return (
+    <View key={field.id} style={styles.liTable} wrap={false}>
+      <View style={styles.liHeaderRow}>
+        <Text style={[styles.liHeaderText, { width: "100%", marginBottom: 4 }]}>
+          {field.label || "List"}
+        </Text>
+      </View>
+      <View style={styles.liHeaderRow}>
+        {cols.map((c) => (
+          <Text
+            key={c.id}
+            style={[styles.liHeaderText, { width: colWidth, paddingRight: 4 }]}
+          >
+            {c.label}
+          </Text>
+        ))}
+      </View>
+      {rows.map((r, i) => {
+        const row = (r ?? {}) as Record<string, unknown>;
+        return (
+          <View
+            key={i}
+            style={[styles.liRow, i % 2 === 1 ? styles.liRowZebra : {}]}
+          >
+            {cols.map((c) => (
+              <Text key={c.id} style={{ width: colWidth, paddingRight: 4, fontSize: 9 }}>
+                {String(row[c.id] ?? "").trim()}
+              </Text>
+            ))}
           </View>
         );
       })}
@@ -451,6 +507,9 @@ function DefaultFormDocument({
                 // row rather than a label|value cell.
                 if (f.type === "line_items") {
                   return renderLineItemsTable(f, data[f.id]);
+                }
+                if (f.type === "list") {
+                  return renderListTable(f, data[f.id]);
                 }
                 if (f.type === "total") {
                   return renderTotalRow(f, data[f.id]);

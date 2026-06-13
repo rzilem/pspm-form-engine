@@ -35,6 +35,7 @@ export const FIELD_TYPES = [
   "page_break",
   "html",
   "line_items",
+  "list",
   "total",
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -83,6 +84,55 @@ export const lineItemValueSchema = z.object({
   presetIndex: z.coerce.number().int().min(0).optional(),
 });
 export type LineItemValue = z.infer<typeof lineItemValueSchema>;
+
+// One row of a list field: keyed by column id, each cell a capped string.
+export const listColumnSchema = z.object({
+  id: z.string().min(1).max(64),
+  label: z.string().min(1).max(200),
+});
+export type ListColumn = z.infer<typeof listColumnSchema>;
+
+export const listRowValueSchema = z.preprocess(
+  (v) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (val === null || val === undefined) {
+        out[k] = "";
+      } else if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+        out[k] = String(val).slice(0, 2000);
+      }
+      // Non-scalar cells are dropped rather than stringified.
+    }
+    return out;
+  },
+  z.record(z.string(), z.string().max(2000)),
+);
+export type ListRowValue = z.infer<typeof listRowValueSchema>;
+
+/** Effective columns for a list field (defaults to one "Item" column). */
+export function resolveListColumns(
+  field: FieldDefinition,
+): ListColumn[] {
+  const cols = (field.listColumns ?? []).filter(
+    (c) => c.id.trim() !== "" && c.label.trim() !== "",
+  );
+  if (cols.length > 0) return cols;
+  return [{ id: "item", label: field.label?.trim() || "Item" }];
+}
+
+/** True when a list row has at least one non-blank cell. */
+export function listRowIsMeaningful(
+  row: unknown,
+  columnIds: ReadonlySet<string>,
+): boolean {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+  for (const [k, v] of Object.entries(row as Record<string, unknown>)) {
+    if (!columnIds.has(k)) continue;
+    if (String(v ?? "").trim() !== "") return true;
+  }
+  return false;
+}
 
 // ── Field definition (one object per question on the form) ─────────────
 const fieldOptionSchema = z.object({
@@ -361,6 +411,9 @@ export const fieldDefinitionSchema = z.object({
     )
     .max(100)
     .optional(),
+  // list: column headers for a repeating multi-column table. Ignored by other
+  // field types. When empty/absent, defaults to a single column (field label).
+  listColumns: z.array(listColumnSchema).max(12).optional(),
   // Optional validation hints (max length, min/max number, etc.)
   validation: z
     .object({
@@ -389,6 +442,17 @@ export const fieldDefinitionSchema = z.object({
   {
     message: "Preset line items need at least one item, each with a label",
     path: ["presetItems"],
+  },
+).refine(
+  (d) => {
+    if (d.type !== "list") return true;
+    const cols = d.listColumns ?? [];
+    const ids = cols.map((c) => c.id);
+    return new Set(ids).size === ids.length;
+  },
+  {
+    message: "List column ids must be unique",
+    path: ["listColumns"],
   },
 );
 export type FieldDefinition = z.infer<typeof fieldDefinitionSchema>;
@@ -660,6 +724,9 @@ export function buildSubmissionSchema(
         // transform below, never taken from the client.
         leaf = z.array(lineItemValueSchema);
         break;
+      case "list":
+        leaf = z.array(listRowValueSchema);
+        break;
       case "file_upload":
         // Each entry is the descriptor /api/upload returned. Required
         // gating is applied below — empty array still passes the array
@@ -774,7 +841,8 @@ export function buildSubmissionSchema(
         f.type === "file_upload" ||
         f.type === "checkbox_group" ||
         (f.type === "image_choice" && f.multiple) ||
-        f.type === "line_items"
+        f.type === "line_items" ||
+        f.type === "list"
       ) {
         leaf = (leaf as z.ZodArray<z.ZodTypeAny>).min(
           1,
@@ -885,6 +953,59 @@ export function buildSubmissionSchema(
             });
           }
         }
+      },
+    ) as unknown as z.ZodType<Record<string, unknown>>;
+  }
+
+  // A required list field must have at least one MEANINGFUL row — same pattern
+  // as line_items: the leaf's .min(1) only proves non-empty array.
+  if (fields.some((f) => f.type === "list" && f.required)) {
+    obj = (obj as unknown as z.ZodObject<z.ZodRawShape>).superRefine(
+      (data: Record<string, unknown>, ctx: z.RefinementCtx) => {
+        const visible = resolveVisibleFieldIds(fields, data);
+        for (const f of fields) {
+          if (f.type !== "list" || !f.required || !visible.has(f.id)) continue;
+          const rows = Array.isArray(data[f.id]) ? (data[f.id] as unknown[]) : [];
+          const colIds = new Set(resolveListColumns(f).map((c) => c.id));
+          const meaningful = rows.filter((r) =>
+            listRowIsMeaningful(r, colIds),
+          ).length;
+          if (meaningful === 0) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [f.id],
+              message: `${f.label} is required`,
+            });
+          }
+        }
+      },
+    ) as unknown as z.ZodType<Record<string, unknown>>;
+  }
+
+  // Strip unknown column keys from list rows so clients can't bloat storage.
+  if (fields.some((f) => f.type === "list")) {
+    obj = (obj as z.ZodType<Record<string, unknown>>).transform(
+      (data: Record<string, unknown>) => {
+        const out = { ...data };
+        for (const f of fields) {
+          if (f.type !== "list") continue;
+          const rows = out[f.id];
+          if (!Array.isArray(rows)) continue;
+          const colIds = new Set(resolveListColumns(f).map((c) => c.id));
+          out[f.id] = rows.map((r) => {
+            const rec = (r ?? {}) as Record<string, unknown>;
+            const row: Record<string, string> = {};
+            for (const id of colIds) {
+              const v = rec[id];
+              row[id] =
+                v === null || v === undefined
+                  ? ""
+                  : String(v).slice(0, 2000);
+            }
+            return row;
+          });
+        }
+        return out;
       },
     ) as unknown as z.ZodType<Record<string, unknown>>;
   }
@@ -1165,6 +1286,23 @@ export function formatFieldDisplayText(
               : "";
           return `${desc} — ${amt}${qty}`;
         })
+        .join("\n");
+    }
+    case "list": {
+      if (!Array.isArray(raw) || raw.length === 0) return "";
+      const cols = resolveListColumns(field);
+      const colIds = new Set(cols.map((c) => c.id));
+      const meaningful = raw.filter((r) => listRowIsMeaningful(r, colIds));
+      if (meaningful.length === 0) return "";
+      return meaningful
+        .map((r) => {
+          const row = (r ?? {}) as Record<string, unknown>;
+          return cols
+            .map((c) => String(row[c.id] ?? "").trim())
+            .filter(Boolean)
+            .join(" | ");
+        })
+        .filter(Boolean)
         .join("\n");
     }
     case "total": {

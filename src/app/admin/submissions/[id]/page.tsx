@@ -10,6 +10,8 @@ import { SelectField } from "@/components/ui/SelectField";
 import {
   formatFieldDisplayText,
   getSelectedImageChoiceOptions,
+  resolveListColumns,
+  listRowIsMeaningful,
   type FieldDefinition,
 } from "@/lib/form-definitions";
 
@@ -102,6 +104,46 @@ function renderSubmissionValue(
   schema: FieldDefinition[] | null | undefined,
 ): ReactNode {
   const field = schema?.find((f) => f.id === key);
+  if (field?.type === "list") {
+    const cols = resolveListColumns(field);
+    const colIds = new Set(cols.map((c) => c.id));
+    const rows = Array.isArray(v)
+      ? v.filter((r) => listRowIsMeaningful(r, colIds))
+      : [];
+    if (rows.length === 0) return "—";
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-[240px] border-collapse text-sm">
+          <thead>
+            <tr>
+              {cols.map((c) => (
+                <th
+                  key={c.id}
+                  className="border border-border bg-muted/50 px-2 py-1 text-left text-xs font-medium"
+                >
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const row = (r ?? {}) as Record<string, unknown>;
+              return (
+                <tr key={i}>
+                  {cols.map((c) => (
+                    <td key={c.id} className="border border-border px-2 py-1">
+                      {String(row[c.id] ?? "").trim() || "—"}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   if (field?.type === "image_choice") {
     const selections = getSelectedImageChoiceOptions(field, v);
     if (selections.length === 0) return "—";

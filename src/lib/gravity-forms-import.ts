@@ -7,7 +7,7 @@
  * or a single form object for the REST GET. This module accepts either.
  *
  * The mapping is deliberately conservative — when in doubt we land on
- * "text" rather than skip. Unsupported types (list, post-*)
+ * "text" rather than skip. Unsupported types (post-*)
  * emit a `warnings` entry so the admin can decide whether to redo by hand.
  */
 import { z } from "zod";
@@ -134,8 +134,7 @@ type GfFormPart = z.infer<typeof gfFormSchema>;
 // ── Field type mapping ─────────────────────────────────────────────────
 // Each GF type lands on one of our FieldDefinition types or generates a
 // warning when we don't have a 1:1 mapping. Composites (name, address)
-// flatten to our composite types; "fileupload" → file_upload; "list" →
-// warning.
+// flatten to our composite types; "fileupload" → file_upload; "list" → list.
 const FIELD_TYPE_MAP: Record<string, FieldDefinition["type"] | null> = {
   text: "text",
   textarea: "textarea",
@@ -158,7 +157,7 @@ const FIELD_TYPE_MAP: Record<string, FieldDefinition["type"] | null> = {
   // Unsupported — warn and skip. Listed explicitly so we don't silently
   // map them via the default.
   page: "page_break",
-  list: null,
+  list: "list",
   post_title: null,
   post_content: null,
   post_image: null,
@@ -260,6 +259,45 @@ function gfScalarDefault(gf: GfField): string | undefined {
   const raw = (gf as Record<string, unknown>).defaultValue;
   if (raw === undefined || raw === null || raw === "") return undefined;
   return String(raw).slice(0, 500);
+}
+
+function makeListColumnId(label: string, taken: ReadonlySet<string>): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 56);
+  const base = slug || "col";
+  if (!taken.has(base) && base.length <= 64) return base;
+  for (let n = 2; n < 100000; n += 1) {
+    const candidate = `${base}_${n}`.slice(0, 64);
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `col_${Date.now()}`.slice(0, 64);
+}
+
+function gfListColumns(
+  gf: GfField,
+): NonNullable<FieldDefinition["listColumns"]> {
+  const rec = gf as Record<string, unknown>;
+  const enableColumns = coerceBool(rec.enableColumns);
+  if (enableColumns && Array.isArray(gf.choices) && gf.choices.length > 0) {
+    const taken = new Set<string>();
+    const cols: NonNullable<FieldDefinition["listColumns"]> = [];
+    for (let i = 0; i < gf.choices.length && cols.length < 12; i += 1) {
+      const choice = (gf.choices[i] ?? {}) as Record<string, unknown>;
+      const label = String(choice.text ?? choice.value ?? `Column ${i + 1}`)
+        .trim()
+        .slice(0, 200);
+      if (!label) continue;
+      const id = makeListColumnId(label, taken);
+      taken.add(id);
+      cols.push({ id, label });
+    }
+    if (cols.length > 0) return cols;
+  }
+  const fallbackLabel = (gf.label ?? gf.adminLabel ?? "Item").slice(0, 200);
+  return [{ id: "item", label: fallbackLabel || "Item" }];
 }
 
 function gfInputMask(gf: GfField): string | undefined {
@@ -381,6 +419,7 @@ function mapField(
     ...(mappedType === "html" && gf.content
       ? { html: gf.content.slice(0, 20000) }
       : {}),
+    ...(mappedType === "list" ? { listColumns: gfListColumns(gf) } : {}),
   };
   // Validate against the canonical schema so a bad GF row surfaces here
   // rather than as a runtime crash later.

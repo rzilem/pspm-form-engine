@@ -15,9 +15,14 @@ import type {
   FieldDefinition,
   FieldOption,
   LineItemValue,
+  ListRowValue,
   UploadedFile,
 } from "@/lib/form-definitions";
-import { lineItemTotal, formatMoney } from "@/lib/form-definitions";
+import {
+  lineItemTotal,
+  formatMoney,
+  resolveListColumns,
+} from "@/lib/form-definitions";
 
 const SCALAR_READONLY_TYPES = new Set<FieldDefinition["type"]>([
   "text",
@@ -329,6 +334,127 @@ export function DynamicField({
                     {formatMoney(subtotal)}
                   </span>
                 </span>
+              </div>
+              {error && (
+                <p className="text-xs text-error" role="alert">
+                  {error.message}
+                </p>
+              )}
+            </fieldset>
+          );
+        }}
+      />
+    );
+  }
+
+  if (field.type === "list") {
+    const columns = resolveListColumns(field);
+    return (
+      <Controller
+        name={field.id}
+        control={control}
+        defaultValue={[]}
+        render={({ field: controllerField }) => {
+          const rows: ListRowValue[] = Array.isArray(controllerField.value)
+            ? (controllerField.value as ListRowValue[])
+            : [];
+          const setRows = (next: ListRowValue[]) => controllerField.onChange(next);
+          const emptyRow = (): ListRowValue => {
+            const row: ListRowValue = {};
+            for (const c of columns) row[c.id] = "";
+            return row;
+          };
+          const baseRows = (): ListRowValue[] =>
+            rows.length > 0 ? rows : field.required ? [emptyRow()] : [];
+          const update = (i: number, colId: string, val: string) => {
+            const base = baseRows();
+            setRows(
+              base.map((r, idx) => (idx === i ? { ...r, [colId]: val } : r)),
+            );
+          };
+          const addRow = () => setRows([...baseRows(), emptyRow()]);
+          const removeRow = (i: number) => {
+            const next = baseRows().filter((_, idx) => idx !== i);
+            if (next.length === 0 && field.required) {
+              setRows([emptyRow()]);
+            } else {
+              setRows(next);
+            }
+          };
+          const displayRows = baseRows();
+          return (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-sm font-medium text-foreground">
+                {field.label}
+                {field.required && (
+                  <span className="text-error ml-0.5" aria-hidden="true">*</span>
+                )}
+              </legend>
+              {field.helpText && (
+                <p className="text-xs text-muted">{field.helpText}</p>
+              )}
+              <div className="overflow-x-auto -mx-1 px-1">
+                <table className="w-full min-w-[280px] border-collapse text-sm">
+                  <thead>
+                    <tr>
+                      {columns.map((c) => (
+                        <th
+                          key={c.id}
+                          className="border border-border bg-muted/40 px-2 py-1.5 text-left text-xs font-medium text-foreground"
+                        >
+                          {c.label}
+                        </th>
+                      ))}
+                      <th className="w-10 border border-border bg-muted/40" aria-label="Remove row" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayRows.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={columns.length + 1}
+                          className="border border-border px-2 py-2 text-xs text-muted"
+                        >
+                          No rows yet.
+                        </td>
+                      </tr>
+                    )}
+                    {displayRows.map((row, i) => (
+                      <tr key={i}>
+                        {columns.map((c) => (
+                          <td key={c.id} className="border border-border p-1">
+                            <input
+                              aria-label={`Row ${i + 1}, ${c.label}`}
+                              type="text"
+                              value={row[c.id] ?? ""}
+                              onChange={(e) => update(i, c.id, e.target.value)}
+                              className="w-full min-w-[80px] rounded-[8px] border border-border bg-white px-2 py-2 text-base focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                            />
+                          </td>
+                        ))}
+                        <td className="border border-border p-1 text-center">
+                          <button
+                            type="button"
+                            aria-label={`Remove row ${i + 1}`}
+                            onClick={() => removeRow(i)}
+                            className="rounded-[8px] border border-error text-error px-2 py-1 text-sm hover:bg-error-light"
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="text-sm font-medium text-primary hover:text-primary-hover"
+                >
+                  + Add row
+                </button>
               </div>
               {error && (
                 <p className="text-xs text-error" role="alert">

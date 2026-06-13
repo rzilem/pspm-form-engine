@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/Button";
 import {
   buildSubmissionSchema,
   computeFormTotal,
+  resolveListColumns,
   resolveVisibleFieldIds,
   type FieldType,
   type FormDefinition,
@@ -280,7 +281,15 @@ export function DynamicForm({ definition, preview = false }: DynamicFormProps) {
       )
         continue;
       if (f.type === "consent") out[f.id] = false;
-      else if (
+      else if (f.type === "list") {
+        if (f.required) {
+          const emptyRow: Record<string, string> = {};
+          for (const c of resolveListColumns(f)) emptyRow[c.id] = "";
+          out[f.id] = [emptyRow];
+        } else {
+          out[f.id] = [];
+        }
+      } else if (
         f.type === "checkbox_group" ||
         f.type === "file_upload" ||
         f.type === "line_items" ||
