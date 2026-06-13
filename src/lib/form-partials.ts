@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 import {
   uploadedFileSchema,
+  resolveVisibleFieldIds,
   type FieldDefinition,
   type FormDefinition,
 } from "@/lib/form-definitions";
@@ -161,13 +162,15 @@ export async function deleteFormPartialByToken(
   }
 }
 
-/** First email-type field value in partial data (for optional link email). */
+/** First visible email-type field value in partial data (for optional link email). */
 export function findSubmitterEmail(
   definition: FormDefinition,
   data: Record<string, unknown>,
 ): string | null {
+  const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
   for (const f of definition.field_schema) {
     if (f.type !== "email") continue;
+    if (!visibleIds.has(f.id)) continue;
     const v = data[f.id];
     if (typeof v !== "string") continue;
     const trimmed = v.trim();

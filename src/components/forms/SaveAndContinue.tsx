@@ -3,7 +3,10 @@
 import { useCallback, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/Button";
-import type { FormDefinition } from "@/lib/form-definitions";
+import {
+  resolveVisibleFieldIds,
+  type FormDefinition,
+} from "@/lib/form-definitions";
 import {
   RECAPTCHA_SITE_KEY,
   getRecaptchaToken,
@@ -51,7 +54,10 @@ export function SaveAndContinueButton({
     setError(null);
     try {
       const data = getValues();
-      const emailField = definition.field_schema.find((f) => f.type === "email");
+      const visibleIds = resolveVisibleFieldIds(definition.field_schema, data);
+      const emailField = definition.field_schema.find(
+        (f) => f.type === "email" && visibleIds.has(f.id),
+      );
       const emailRaw = emailField ? data[emailField.id] : undefined;
       const emailTo = (() => {
         if (typeof emailRaw !== "string") return undefined;
