@@ -13,29 +13,68 @@ import { logger } from "@/lib/logger";
 const BUCKET = "form-uploads";
 const MAX_MERGED_BYTES = 20 * 1024 * 1024;
 
-function isPdfFile(file: UploadedFile): boolean {
-  const mime = file.mimeType.toLowerCase();
-  if (mime === "application/pdf") return true;
-  const lower = file.filename.toLowerCase();
-  return lower.endsWith(".pdf");
+/** Trusted object metadata from Supabase Storage (not client descriptor). */
+type TrustedUploadMeta = {
+  contentType: string;
+  size: number;
+};
+
+function isTrustedPdf(meta: TrustedUploadMeta): boolean {
+  return meta.contentType === "application/pdf";
 }
 
-function isMergeableImage(file: UploadedFile): boolean {
-  const mime = file.mimeType.toLowerCase();
-  if (mime === "image/png" || mime === "image/jpeg") return true;
-  const lower = file.filename.toLowerCase();
-  return (
-    lower.endsWith(".png") ||
-    lower.endsWith(".jpg") ||
-    lower.endsWith(".jpeg")
-  );
+function isTrustedMergeableImage(meta: TrustedUploadMeta): boolean {
+  return meta.contentType === "image/png" || meta.contentType === "image/jpeg";
 }
 
-/** Whether this upload will be merged (metadata-only — no download). */
-function isMergeCandidate(file: UploadedFile, mergeImages: boolean): boolean {
-  if (isPdfFile(file)) return true;
-  if (mergeImages && isMergeableImage(file)) return true;
+/** Whether this upload will be merged based on trusted storage metadata only. */
+function isTrustedMergeCandidate(
+  meta: TrustedUploadMeta,
+  mergeImages: boolean,
+): boolean {
+  if (isTrustedPdf(meta)) return true;
+  if (mergeImages && isTrustedMergeableImage(meta)) return true;
   return false;
+}
+
+/** Fetch real size + content-type from storage without downloading bytes. */
+async function fetchUploadMetadata(
+  path: string,
+): Promise<TrustedUploadMeta | null> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.from(BUCKET).info(path);
+  if (error || !data) {
+    logger.warn("PDF merge: storage metadata lookup failed — skipping upload", {
+      path,
+      error: error?.message,
+    });
+    return null;
+  }
+
+  const contentType = (
+    data.contentType ??
+    data.metadata?.mimetype ??
+    ""
+  )
+    .toLowerCase()
+    .trim();
+  const size =
+    typeof data.size === "number" && data.size > 0
+      ? data.size
+      : typeof data.metadata?.size === "number" && data.metadata.size > 0
+        ? data.metadata.size
+        : 0;
+
+  if (!contentType || size <= 0) {
+    logger.warn("PDF merge: incomplete storage metadata — skipping upload", {
+      path,
+      contentType: contentType || "(missing)",
+      size,
+    });
+    return null;
+  }
+
+  return { contentType, size };
 }
 
 /** Collect uploaded files from visible file_upload fields in schema order. */
@@ -102,13 +141,12 @@ async function appendPdfPages(
 async function appendImagePage(
   merged: PDFDocument,
   bytes: Buffer,
-  file: UploadedFile,
+  path: string,
+  contentType: string,
 ): Promise<number> {
   try {
-    const mime = file.mimeType.toLowerCase();
-    const lower = file.filename.toLowerCase();
     const image =
-      mime === "image/png" || lower.endsWith(".png")
+      contentType === "image/png"
         ? await merged.embedPng(bytes)
         : await merged.embedJpg(bytes);
     const page = merged.addPage([image.width, image.height]);
@@ -121,7 +159,7 @@ async function appendImagePage(
     return bytes.length;
   } catch (err) {
     logger.warn("PDF merge: skipped unreadable image", {
-      path: file.path,
+      path,
       error: err instanceof Error ? err.message : String(err),
     });
     return 0;
@@ -151,12 +189,15 @@ export async function mergeFormPdfWithUploads(
     let appendedBytes = 0;
 
     for (const file of uploads) {
-      if (!isMergeCandidate(file, cfg.mergeImages)) continue;
+      const trusted = await fetchUploadMetadata(file.path);
+      if (!trusted || !isTrustedMergeCandidate(trusted, cfg.mergeImages)) {
+        continue;
+      }
 
-      if (projectedSize + file.size > MAX_MERGED_BYTES) {
+      if (projectedSize + trusted.size > MAX_MERGED_BYTES) {
         logger.warn("PDF merge: skipping upload — would exceed combined size cap", {
           path: file.path,
-          fileSize: file.size,
+          fileSize: trusted.size,
           projectedBytes: projectedSize,
           cap: MAX_MERGED_BYTES,
         });
@@ -167,10 +208,15 @@ export async function mergeFormPdfWithUploads(
       if (!bytes) continue;
 
       let added = 0;
-      if (isPdfFile(file)) {
+      if (isTrustedPdf(trusted)) {
         added = await appendPdfPages(merged, bytes, file.path);
-      } else if (cfg.mergeImages && isMergeableImage(file)) {
-        added = await appendImagePage(merged, bytes, file);
+      } else if (cfg.mergeImages && isTrustedMergeableImage(trusted)) {
+        added = await appendImagePage(
+          merged,
+          bytes,
+          file.path,
+          trusted.contentType,
+        );
       }
 
       if (added > 0) {
