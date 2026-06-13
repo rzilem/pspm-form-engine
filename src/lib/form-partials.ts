@@ -4,6 +4,7 @@
  * by RLS on form_partials.
  */
 import crypto from "node:crypto";
+import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 import {
@@ -168,10 +169,11 @@ export function findSubmitterEmail(
   for (const f of definition.field_schema) {
     if (f.type !== "email") continue;
     const v = data[f.id];
-    if (typeof v === "string" && v.includes("@")) {
-      const trimmed = v.trim();
-      if (trimmed) return trimmed;
-    }
+    if (typeof v !== "string") continue;
+    const trimmed = v.trim();
+    if (!trimmed) continue;
+    const parsed = z.string().email().safeParse(trimmed);
+    if (parsed.success) return trimmed;
   }
   return null;
 }
