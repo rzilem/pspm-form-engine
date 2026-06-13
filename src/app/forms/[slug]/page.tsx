@@ -8,11 +8,14 @@ import {
   aggregateInventoryUsage,
   computeInventoryRemaining,
   evaluateSubmissionLimit,
+  formHasConfiguredSubmissionLimit,
   formHasInventory,
+  formNeedsSubmissionStats,
 } from "@/lib/form-definitions";
 import {
   countFormSubmissions,
   fetchSubmissionDataRows,
+  FORM_STATS_UNAVAILABLE_MESSAGE,
 } from "@/lib/form-submission-stats";
 import { FormClosedMessage } from "@/components/forms/FormClosedMessage";
 import { DynamicForm } from "./DynamicForm";
@@ -47,23 +50,49 @@ export default async function DynamicFormPage({ params, searchParams }: PageProp
     notFound();
   }
 
-  const entryCount = await countFormSubmissions(definition.id);
-  const limitStatus = evaluateSubmissionLimit(
+  const needsStats = formNeedsSubmissionStats(
+    definition.field_schema,
     definition.submission_limit,
-    entryCount,
+  );
+  const hasLimit = formHasConfiguredSubmissionLimit(
+    definition.submission_limit,
+  );
+  const hasInventory = formHasInventory(definition.field_schema);
+
+  let limitStatus = evaluateSubmissionLimit(
+    definition.submission_limit,
+    0,
     new Date(),
   );
-
   let inventoryRemaining:
     | Record<string, Record<string, number>>
     | undefined;
-  if (formHasInventory(definition.field_schema)) {
-    const rows = await fetchSubmissionDataRows(definition.id);
-    const usage = aggregateInventoryUsage(definition.field_schema, rows);
-    inventoryRemaining = computeInventoryRemaining(
-      definition.field_schema,
-      usage,
-    );
+
+  if (needsStats) {
+    try {
+      if (hasLimit) {
+        const entryCount = await countFormSubmissions(definition.id);
+        limitStatus = evaluateSubmissionLimit(
+          definition.submission_limit,
+          entryCount,
+          new Date(),
+        );
+      }
+      if (hasInventory) {
+        const rows = await fetchSubmissionDataRows(definition.id);
+        const usage = aggregateInventoryUsage(definition.field_schema, rows);
+        inventoryRemaining = computeInventoryRemaining(
+          definition.field_schema,
+          usage,
+        );
+      }
+    } catch {
+      limitStatus = {
+        open: false,
+        message: FORM_STATS_UNAVAILABLE_MESSAGE,
+      };
+      inventoryRemaining = undefined;
+    }
   }
 
   let initialValues: Record<string, unknown> | undefined;

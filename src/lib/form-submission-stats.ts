@@ -5,6 +5,19 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 
+export const FORM_STATS_UNAVAILABLE_MESSAGE =
+  "This form is temporarily unavailable. Please try again later.";
+
+export class FormSubmissionStatsError extends Error {
+  readonly causeDetail?: string;
+
+  constructor(message: string, causeDetail?: string) {
+    super(message);
+    this.name = "FormSubmissionStatsError";
+    this.causeDetail = causeDetail;
+  }
+}
+
 /** Count completed submissions for a dynamic form (excludes form_partials). */
 export async function countFormSubmissions(
   formDefinitionId: string,
@@ -19,7 +32,10 @@ export async function countFormSubmissions(
       formDefinitionId,
       error: error.message,
     });
-    return 0;
+    throw new FormSubmissionStatsError(
+      "Failed to count form submissions",
+      error.message,
+    );
   }
   return count ?? 0;
 }
@@ -38,7 +54,10 @@ export async function fetchSubmissionDataRows(
       formDefinitionId,
       error: error.message,
     });
-    return [];
+    throw new FormSubmissionStatsError(
+      "Failed to fetch submission data for inventory",
+      error.message,
+    );
   }
 
   return (data ?? []).map((row) => ({

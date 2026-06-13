@@ -224,6 +224,29 @@ export function evaluateSubmissionLimit(
   return { open: true, message: "" };
 }
 
+/** True when submission_limit has maxEntries, openAt, or closeAt configured. */
+export function formHasConfiguredSubmissionLimit(
+  config: SubmissionLimit,
+): boolean {
+  const limit = config ?? {};
+  const hasMax =
+    limit.maxEntries !== undefined && limit.maxEntries > 0;
+  const openAt = parseLimitDate(limit.openAt);
+  const closeAt = parseLimitDate(limit.closeAt);
+  return hasMax || openAt !== null || closeAt !== null;
+}
+
+/** True when server-side submission stats are required for enforcement. */
+export function formNeedsSubmissionStats(
+  fields: FieldDefinition[],
+  submissionLimit: SubmissionLimit,
+): boolean {
+  return (
+    formHasConfiguredSubmissionLimit(submissionLimit) ||
+    formHasInventory(fields)
+  );
+}
+
 // ── Inventory (per-choice caps) ─────────────────────────────────────────
 export const INVENTORY_FIELD_TYPES = new Set<FieldType>([
   "radio",
