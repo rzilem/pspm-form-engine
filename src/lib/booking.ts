@@ -1,4 +1,4 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import type { AmenitySettings } from "@/lib/database.types";
 
 export interface TimeSlot {
@@ -15,7 +15,7 @@ export async function getAvailableSlots(
   amenitySlug: string,
   date: string // YYYY-MM-DD
 ): Promise<{ slots: TimeSlot[]; amenityId: string | null; error?: string }> {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin();
 
   // 1. Get amenity
   const { data: amenity, error: amenityErr } = await supabase
@@ -192,6 +192,61 @@ export function generateConfirmationCode(date: string): string {
 /** Generate a UUID-like manage token */
 export function generateManageToken(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * Validate that a given (amenity, date, start, end) tuple is a legal slot:
+ * within an active availability_rule for that day-of-week, not on a blackout
+ * date, and end matches a generated slot boundary. Used by reschedule + admin
+ * manual booking so callers can't write outside the availability window.
+ */
+export async function validateSlot(
+  amenityId: string,
+  date: string,
+  startTime: string,
+  endTime: string
+): Promise<{ valid: true } | { valid: false; reason: string }> {
+  const supabase = getSupabaseAdmin();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { valid: false, reason: "Invalid date format" };
+
+  // Blackout check
+  const { data: blackouts } = await supabase
+    .from("blackout_dates")
+    .select("id")
+    .eq("amenity_id", amenityId)
+    .eq("date", date);
+  if (blackouts && blackouts.length > 0) {
+    return { valid: false, reason: "Date is blacked out" };
+  }
+
+  // Day-of-week rule
+  const dow = new Date(date + "T00:00:00").getUTCDay();
+  const { data: rule } = await supabase
+    .from("availability_rules")
+    .select("start_time, end_time, slot_duration_minutes, buffer_minutes")
+    .eq("amenity_id", amenityId)
+    .eq("day_of_week", dow)
+    .eq("is_active", true)
+    .single();
+  if (!rule) return { valid: false, reason: "No availability on this day" };
+
+  // Generate the legal slot grid for this rule and check membership
+  const slots = generateSlots(
+    rule.start_time,
+    rule.end_time,
+    rule.slot_duration_minutes,
+    rule.buffer_minutes ?? 0
+  );
+  const match = slots.find((s) => normalizeTime(s.start) === normalizeTime(startTime) && normalizeTime(s.end) === normalizeTime(endTime));
+  if (!match) return { valid: false, reason: "Start/end time is not a valid slot for this amenity" };
+
+  return { valid: true };
+}
+
+/** Trim "HH:MM:SS" → "HH:MM" so DB values (TIME) compare cleanly against form strings */
+function normalizeTime(t: string): string {
+  return t.split(":").slice(0, 2).join(":");
 }
 
 /** Generate a session ID for slot holds */

@@ -1,6 +1,7 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 import { sendCancellationEmail } from "@/lib/email";
+import { validateSlot } from "@/lib/booking";
 import type { AmenitySettings } from "@/lib/database.types";
 import Stripe from "stripe";
 
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
       return Response.json({ error: "Missing token" }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     const { data: reservation, error } = await supabase
       .from("reservations")
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing token or action" }, { status: 400 });
     }
 
-    const supabase = getSupabase();
+    const supabase = getSupabaseAdmin();
 
     // Fetch reservation
     const { data: reservation, error: fetchErr } = await supabase
@@ -122,8 +123,8 @@ export async function POST(request: Request) {
 }
 
 async function handleCancel(
-  supabase: ReturnType<typeof getSupabase>,
-  reservation: { id: string; amenity_id: string; reservation_date: string; stripe_payment_intent_id: string | null; amount_cents: number },
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  reservation: { id: string; amenity_id: string; reservation_date: string; start_time: string; stripe_payment_intent_id: string | null; amount_cents: number },
   reason: string
 ) {
   // Check cancellation window
@@ -136,7 +137,10 @@ async function handleCancel(
   const settings = (amenity?.settings ?? {}) as AmenitySettings;
   const cancellationHours = settings.cancellation_window_hours ?? 48;
 
-  const reservationDateTime = new Date(`${reservation.reservation_date}T00:00:00`);
+  // Use the actual reservation start time (not midnight) so an 8pm booking
+  // measures "hours until 8pm", not "hours until midnight that morning".
+  const startTime = reservation.start_time.length === 5 ? `${reservation.start_time}:00` : reservation.start_time;
+  const reservationDateTime = new Date(`${reservation.reservation_date}T${startTime}`);
   const hoursUntil = (reservationDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
   const eligibleForRefund = hoursUntil >= cancellationHours;
 
@@ -214,13 +218,22 @@ async function handleCancel(
 }
 
 async function handleReschedule(
-  supabase: ReturnType<typeof getSupabase>,
+  supabase: ReturnType<typeof getSupabaseAdmin>,
   reservation: { id: string; amenity_id: string; reservation_date: string; start_time: string; end_time: string },
   newDate: string,
   newStartTime: string,
   newEndTime: string
 ) {
-  // Check new slot availability
+  // Validate the new slot is a legal slot for this amenity (availability rule + blackout)
+  const slotCheck = await validateSlot(reservation.amenity_id, newDate, newStartTime, newEndTime);
+  if (!slotCheck.valid) {
+    return Response.json(
+      { error: `Cannot reschedule: ${slotCheck.reason}` },
+      { status: 400 }
+    );
+  }
+
+  // Check new slot availability against other reservations
   const { data: conflicts } = await supabase
     .from("reservations")
     .select("id")
